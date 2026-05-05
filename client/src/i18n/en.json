@@ -9,7 +9,8 @@
     "eq": "EQ",
     "dsp": "DSP",
     "settings": "Settings",
-    "search": "Search"
+    "search": "Search",
+    "effects": "FX"
   },
   "player": {
     "nowPlaying": "Now Playing",
@@ -260,5 +261,17 @@
     "globalPlaceholder": "Search across your whole library...",
     "startTyping": "Type to search your entire library",
     "noResults": "No results found"
+  },
+  "effects": {
+    "title": "FX Effects",
+    "subtitle": "Real-time space and ambience",
+    "live": "Real time",
+    "reverb": "Reverb",
+    "reverbAmount": "REVERB",
+    "reverbDescription": "Adds short reflections for depth and width without pushing the mix too far away.",
+    "concertHall": "Concert Hall",
+    "concertHallAmount": "HALL",
+    "concertHallDescription": "Simulates a large concert hall with a longer tail, smooth diffusion, and an enveloping feel.",
+    "description": "Concert Hall is a hall-style reverb: it emulates the reflections and natural decay of large spaces such as auditoriums or theaters."
   }
 }

@@ -56,8 +56,18 @@ export interface CrossfadeConfig {
   duration: number; // segundos
 }
 
+export interface ReverbEffectConfig {
+  reverbEnabled: boolean;
+  reverbAmount: number;
+  concertHallEnabled: boolean;
+  concertHallAmount: number;
+}
+
 export const EQ_GAIN_MIN = -3;
 export const EQ_GAIN_MAX = 3;
+
+const clampEffectAmount = (value: number): number =>
+  Math.max(0, Math.min(100, value));
 
 const EQ_31_FREQUENCIES = [
   20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160,
@@ -98,10 +108,18 @@ export interface IntegratedAudioController {
   setOnTrackEnded: (callback: (() => void) | null) => void;
   setOnTrackError: (callback: ((error: Error) => void) | null) => void;
   setCrossfadeConfig: (config: CrossfadeConfig) => void;
+  setReverbEnabled: (enabled: boolean) => void;
+  setReverbAmount: (amount: number) => void;
+  setConcertHallEnabled: (enabled: boolean) => void;
+  setConcertHallAmount: (amount: number) => void;
   resetAfterError: () => void;
   eqBands: EqualizerBand[];
   eqEnabled: boolean;
   epicenterEnabled: boolean;
+  reverbEnabled: boolean;
+  reverbAmount: number;
+  concertHallEnabled: boolean;
+  concertHallAmount: number;
 }
 
 export function useIntegratedAudioProcessor(): IntegratedAudioController {
@@ -117,8 +135,16 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
   const eqLowSplitRef = useRef<BiquadFilterNode | null>(null);
   const eqHighSplitRef = useRef<BiquadFilterNode | null>(null);
   const eqOutputGainRef = useRef<GainNode | null>(null);
+  const effectsInputGainRef = useRef<GainNode | null>(null);
+  const effectsDryGainRef = useRef<GainNode | null>(null);
+  const effectsOutputGainRef = useRef<GainNode | null>(null);
+  const reverbConvolverRef = useRef<ConvolverNode | null>(null);
+  const reverbWetGainRef = useRef<GainNode | null>(null);
+  const concertHallConvolverRef = useRef<ConvolverNode | null>(null);
+  const concertHallWetGainRef = useRef<GainNode | null>(null);
   const masterGainRef = useRef<GainNode | null>(null);
   const bypassConnectionRef = useRef<boolean>(false);
+  const fixedAudioChainConnectedRef = useRef(false);
   const objectUrlRef = useRef<string | null>(null);
   const dspParamsRef = useRef<StreamingParams>({
     sweepFreq: 45,
@@ -148,12 +174,70 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
   const [eqBands, setEqBands] = useState<EqualizerBand[]>(DEFAULT_EQ_BANDS);
   const [eqEnabled, setEqEnabledState] = useState(true);
   const [epicenterEnabled, setEpicenterEnabledState] = useState(false);
+  const eqEnabledRef = useRef(true);
+  const epicenterEnabledRef = useRef(false);
+  const [reverbEnabled, setReverbEnabledState] = useState(false);
+  const [reverbAmount, setReverbAmountState] = useState(25);
+  const [concertHallEnabled, setConcertHallEnabledState] = useState(false);
+  const [concertHallAmount, setConcertHallAmountState] = useState(35);
+  const reverbEnabledRef = useRef(false);
+  const reverbAmountRef = useRef(25);
+  const concertHallEnabledRef = useRef(false);
+  const concertHallAmountRef = useRef(35);
   const eqBandsRef = useRef<EqualizerBand[]>(DEFAULT_EQ_BANDS);
   const eqUserPreampDbRef = useRef(0);
 
   useEffect(() => {
     eqBandsRef.current = eqBands;
   }, [eqBands]);
+
+
+  const createReverbImpulse = useCallback(
+    (ctx: AudioContext, seconds: number, decay: number) => {
+      const sampleRate = ctx.sampleRate;
+      const length = Math.max(1, Math.floor(sampleRate * seconds));
+      const impulse = ctx.createBuffer(2, length, sampleRate);
+
+      for (let channel = 0; channel < impulse.numberOfChannels; channel += 1) {
+        const data = impulse.getChannelData(channel);
+        for (let index = 0; index < length; index += 1) {
+          const progress = index / length;
+          const earlyReflection = index < sampleRate * 0.08 ? 1.15 : 1;
+          const tail = Math.pow(1 - progress, decay);
+          data[index] = (Math.random() * 2 - 1) * tail * earlyReflection;
+        }
+      }
+
+      return impulse;
+    },
+    [],
+  );
+
+  const applyReverbMix = useCallback(() => {
+    const ctx = audioContextRef.current;
+    if (!ctx) return;
+
+    const activeWet = Math.max(
+      reverbEnabledRef.current ? reverbAmountRef.current / 100 : 0,
+      concertHallEnabledRef.current ? concertHallAmountRef.current / 100 : 0,
+    );
+    const dryLevel = Math.max(0.55, 1 - activeWet * 0.45);
+
+    effectsDryGainRef.current?.gain.linearRampToValueAtTime(
+      dryLevel,
+      ctx.currentTime + 0.05,
+    );
+    reverbWetGainRef.current?.gain.linearRampToValueAtTime(
+      reverbEnabledRef.current ? (reverbAmountRef.current / 100) * 0.45 : 0,
+      ctx.currentTime + 0.05,
+    );
+    concertHallWetGainRef.current?.gain.linearRampToValueAtTime(
+      concertHallEnabledRef.current
+        ? (concertHallAmountRef.current / 100) * 0.55
+        : 0,
+      ctx.currentTime + 0.05,
+    );
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -191,6 +275,32 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
       analyserNodeRef.current.smoothingTimeConstant = 0.65;
     }
 
+    if (!effectsInputGainRef.current) {
+      effectsInputGainRef.current = ctx.createGain();
+      effectsDryGainRef.current = ctx.createGain();
+      effectsOutputGainRef.current = ctx.createGain();
+      reverbConvolverRef.current = ctx.createConvolver();
+      reverbWetGainRef.current = ctx.createGain();
+      concertHallConvolverRef.current = ctx.createConvolver();
+      concertHallWetGainRef.current = ctx.createGain();
+
+      reverbConvolverRef.current.buffer = createReverbImpulse(ctx, 1.4, 2.4);
+      concertHallConvolverRef.current.buffer = createReverbImpulse(ctx, 3.8, 2.0);
+
+      effectsInputGainRef.current.connect(effectsDryGainRef.current);
+      effectsDryGainRef.current.connect(effectsOutputGainRef.current);
+
+      effectsInputGainRef.current.connect(reverbConvolverRef.current);
+      reverbConvolverRef.current.connect(reverbWetGainRef.current);
+      reverbWetGainRef.current.connect(effectsOutputGainRef.current);
+
+      effectsInputGainRef.current.connect(concertHallConvolverRef.current);
+      concertHallConvolverRef.current.connect(concertHallWetGainRef.current);
+      concertHallWetGainRef.current.connect(effectsOutputGainRef.current);
+
+      applyReverbMix();
+    }
+
     // Inicializar Epicenter Worklet
     if (!workletNodeRef.current) {
       try {
@@ -215,7 +325,7 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
       }
     }
 
-        // Inicializar Ecualizador con split de bandas:
+    // Inicializar Ecualizador con split de bandas:
     // - <=100 Hz solo afectan ruta de bajos
     // - >100 Hz solo afectan ruta de medios/agudos
     if (eqFiltersRef.current.length === 0) {
@@ -235,10 +345,15 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
       eqHighFiltersRef.current = [];
       eqFiltersRef.current = eqBandsRef.current.map((band, index) => {
         const filter = ctx.createBiquadFilter();
-        filter.type = index === 0 ? 'lowshelf' : index === DEFAULT_EQ_BANDS.length - 1 ? 'highshelf' : 'peaking';
+        filter.type =
+          index === 0
+            ? 'lowshelf'
+            : index === DEFAULT_EQ_BANDS.length - 1
+              ? 'highshelf'
+              : 'peaking';
         filter.frequency.value = band.frequency;
         filter.Q.value = 1.0;
-        filter.gain.value = band.gain;
+        filter.gain.value = eqEnabledRef.current ? band.gain : 0;
         if (band.frequency <= 100) {
           eqLowFiltersRef.current.push(filter);
         } else {
@@ -265,20 +380,29 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
       highNode.connect(eqOutputGainRef.current);
     }
 
-// Conectar la parte fija de la cadena (ya no conectamos el source aquí)
-    // Cadena base: Worklet → Equalizer → MasterGain → Destination
-    if (workletNodeRef.current && eqInputGainRef.current && eqOutputGainRef.current && masterGainRef.current) {
+    // Conectar la parte fija de la cadena (ya no conectamos el source aquí)
+    // Cadena base: Worklet → Equalizer → Efectos espaciales → MasterGain → Destination
+    if (
+      !fixedAudioChainConnectedRef.current &&
+      workletNodeRef.current &&
+      eqInputGainRef.current &&
+      eqOutputGainRef.current &&
+      effectsInputGainRef.current &&
+      effectsOutputGainRef.current &&
+      masterGainRef.current
+    ) {
       workletNodeRef.current.connect(eqInputGainRef.current);
-      eqOutputGainRef.current.connect(masterGainRef.current);
+      eqOutputGainRef.current.connect(effectsInputGainRef.current);
+      effectsOutputGainRef.current.connect(masterGainRef.current);
       masterGainRef.current.connect(ctx.destination);
+      fixedAudioChainConnectedRef.current = true;
     }
-  }, []);
+  }, [applyReverbMix, createReverbImpulse]);
 
   // Función para reconectar la cadena según el estado de los efectos
   const updateAudioRouting = useCallback(() => {
     if (!sourceNodeRef.current || !audioContextRef.current) return;
     
-    const ctx = audioContextRef.current;
     const source = sourceNodeRef.current;
     
     // Desconectar todo primero
@@ -289,7 +413,11 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
     }
     
     // Determinar si necesitamos bypass completo
-    const needsBypass = !epicenterEnabled && !eqEnabled;
+    const needsBypass =
+      !epicenterEnabledRef.current &&
+      !eqEnabledRef.current &&
+      !reverbEnabledRef.current &&
+      !concertHallEnabledRef.current;
     
     if (needsBypass && masterGainRef.current) {
       // BYPASS COMPLETO: Source → MasterGain → Destination
@@ -300,13 +428,13 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
       console.log('🎵 AUDIO PURO: Bypass completo activado (sin procesamiento)');
     } else if (workletNodeRef.current) {
       // Usar cadena de procesamiento normal
-      // Source → Worklet → Equalizer → MasterGain → Destination
+      // Source → Worklet → Equalizer → Efectos espaciales → MasterGain → Destination
       source.connect(workletNodeRef.current);
       if (analyserNodeRef.current) source.connect(analyserNodeRef.current);
       bypassConnectionRef.current = false;
       console.log('🎛️ AUDIO CON EFECTOS: Cadena de procesamiento activada');
     }
-  }, [epicenterEnabled, eqEnabled]);
+  }, []);
 
   // Función para iniciar crossfade (fade out)
   const startCrossfadeOut = useCallback(() => {
@@ -411,7 +539,10 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
     dspParamsRef.current = { ...clampedParams };
     
     // Establecer intensity a 0 si Epicenter está desactivado.
-    const finalParams = { ...clampedParams, intensity: epicenterEnabled ? clampedParams.intensity : 0 };
+    const finalParams = {
+      ...clampedParams,
+      intensity: epicenterEnabledRef.current ? clampedParams.intensity : 0,
+    };
     
     const paramEntries = Object.entries(finalParams) as [keyof StreamingParams, number][];
     for (const [key, value] of paramEntries) {
@@ -477,7 +608,7 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
     audioElement.addEventListener('timeupdate', onTimeUpdate);
     audioElement.addEventListener('ended', onEnded);
     audioElement.addEventListener('error', onError);
-  }, [initAudioChain, epicenterEnabled, startCrossfadeIn, startCrossfadeOut, updateAudioRouting]);
+  }, [initAudioChain, startCrossfadeIn, startCrossfadeOut, updateAudioRouting]);
 
   const play = useCallback(() => {
     if (!audioElementRef.current || !audioContextRef.current) return;
@@ -580,6 +711,7 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
   }, [applyEqOutputGain, eqEnabled]);
 
   const setEqEnabled = useCallback((enabled: boolean) => {
+    eqEnabledRef.current = enabled;
     setEqEnabledState(enabled);
 
     const snapshot = eqBandsRef.current;
@@ -606,6 +738,7 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
   }, [applyEqOutputGain, updateAudioRouting]);
 
   const setEpicenterEnabled = useCallback((enabled: boolean) => {
+    epicenterEnabledRef.current = enabled;
     setEpicenterEnabledState(enabled);
     
     const ctx = audioContextRef.current;
@@ -635,6 +768,34 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
   const setCrossfadeConfig = useCallback((config: CrossfadeConfig) => {
     crossfadeConfigRef.current = config;
   }, []);
+
+  const setReverbEnabled = useCallback((enabled: boolean) => {
+    reverbEnabledRef.current = enabled;
+    setReverbEnabledState(enabled);
+    applyReverbMix();
+    setTimeout(() => updateAudioRouting(), 0);
+  }, [applyReverbMix, updateAudioRouting]);
+
+  const setReverbAmount = useCallback((amount: number) => {
+    const clampedAmount = clampEffectAmount(amount);
+    reverbAmountRef.current = clampedAmount;
+    setReverbAmountState(clampedAmount);
+    applyReverbMix();
+  }, [applyReverbMix]);
+
+  const setConcertHallEnabled = useCallback((enabled: boolean) => {
+    concertHallEnabledRef.current = enabled;
+    setConcertHallEnabledState(enabled);
+    applyReverbMix();
+    setTimeout(() => updateAudioRouting(), 0);
+  }, [applyReverbMix, updateAudioRouting]);
+
+  const setConcertHallAmount = useCallback((amount: number) => {
+    const clampedAmount = clampEffectAmount(amount);
+    concertHallAmountRef.current = clampedAmount;
+    setConcertHallAmountState(clampedAmount);
+    applyReverbMix();
+  }, [applyReverbMix]);
 
   const resetAfterError = useCallback(() => {
     if (crossfadeTimeoutRef.current) {
@@ -689,10 +850,18 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
     setOnTrackEnded,
     setOnTrackError,
     setCrossfadeConfig,
+    setReverbEnabled,
+    setReverbAmount,
+    setConcertHallEnabled,
+    setConcertHallAmount,
     resetAfterError,
     eqBands,
     eqEnabled,
     epicenterEnabled,
+    reverbEnabled,
+    reverbAmount,
+    concertHallEnabled,
+    concertHallAmount,
   };
 }
 

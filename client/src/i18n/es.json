@@ -9,7 +9,8 @@
     "eq": "EQ",
     "dsp": "DSP",
     "settings": "Ajustes",
-    "search": "Buscar"
+    "search": "Buscar",
+    "effects": "FX"
   },
   "player": {
     "nowPlaying": "Ahora Suena",
@@ -260,5 +261,17 @@
     "globalPlaceholder": "Buscar en toda la biblioteca...",
     "startTyping": "Escribe para buscar en toda tu biblioteca",
     "noResults": "No se encontraron resultados"
+  },
+  "effects": {
+    "title": "Efectos FX",
+    "subtitle": "Espacio y ambiente en tiempo real",
+    "live": "Tiempo real",
+    "reverb": "Reverb",
+    "reverbAmount": "REVERB",
+    "reverbDescription": "Añade reflexiones cortas para dar profundidad y anchura sin alejar demasiado la mezcla.",
+    "concertHall": "Concert Hall",
+    "concertHallAmount": "HALL",
+    "concertHallDescription": "Simula una sala de conciertos grande con cola más larga, difusión suave y sensación envolvente.",
+    "description": "Concert Hall es una reverb tipo hall: emula las reflexiones y la caída natural de espacios grandes como auditorios o teatros."
   }
 }

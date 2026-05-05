@@ -169,6 +169,10 @@
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
+  .navigation-bar-bottom {
+    bottom: var(--android-navigation-bar-offset, 0px);
+  }
+
   /* Premium card effect */
   .card-elevated {
     @apply bg-zinc-900/60 backdrop-blur-2xl border border-white/5;
