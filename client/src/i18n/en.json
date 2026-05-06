@@ -165,14 +165,15 @@
     "reverb": "Reverb",
     "concertHall": "Concert Hall",
     "amount": "AMOUNT",
-    "reverbDescription": "Adds smooth reflections to give the audio depth and width without changing tracks.",
-    "concertHallDescription": "Simulates a large live-music venue with a longer tail, pre-delay, and dense reflections.",
-    "description": "Both effects use a lightweight Schroeder reverberator: parallel comb filters, two all-pass stages, high-frequency damping, and dry/wet mix to keep clarity in the car.",
-    "reverbProfile": "Profile",
-    "reverbProfileValue": "short tail · controlled mix",
-    "concertProfile": "Hall",
-    "concertProfileValue": "38 ms pre-delay · 1.5–2 s",
-    "convolutionNote": "A true IR/convolution Concert Hall requires measuring a room and correcting the vehicle cabin; this mode emulates that idea in real time without external files."
+    "reverbDescription": "Light Schroeder-style reverb: short pre-delay, four comb filters, and two all-pass filters for depth without muddying the cabin.",
+    "concertHallDescription": "Larger hall inspired by concert rooms: moderate pre-delay, longer tail, high-frequency damping, and a gentle bass lift.",
+    "description": "Concert Hall uses a real-time algorithmic hall. It is not a replacement for real IR convolution plus vehicle MIMO correction, but it keeps clarity with controlled dry/wet mixing.",
+    "reverbSpecOne": "14 ms pre-delay",
+    "reverbSpecTwo": "4 comb + 2 all-pass",
+    "reverbSpecThree": "Controlled short tail",
+    "concertSpecOne": "35 ms pre-delay",
+    "concertSpecTwo": "Approx. 1.5–2 s RT60",
+    "concertSpecThree": "Damping + low shelf"
   },
   "settings": {
     "title": "Settings",

@@ -1594,7 +1594,7 @@ export default function Home() {
         }
         t={t}
       />
-      <div className={activeTab === "player" ? "h-0" : "bottom-nav-spacer"} />
+      <div className={activeTab === "player" ? "h-0" : "h-24"} />
     </div>
   );
 }

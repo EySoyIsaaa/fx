@@ -178,10 +178,6 @@
     padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
   }
 
-  .bottom-nav-spacer {
-    height: calc(6rem + var(--android-navigation-offset, 0px));
-  }
-
   /* Premium card effect */
   .card-elevated {
     @apply bg-zinc-900/60 backdrop-blur-2xl border border-white/5;

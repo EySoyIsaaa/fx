@@ -65,14 +65,8 @@ export function BottomNavigation({
   const [androidNavigationOffset, setAndroidNavigationOffset] = useState(0);
 
   useEffect(() => {
-    const updateOffset = () => {
-      const offset = getAndroidNavigationOffset();
-      setAndroidNavigationOffset(offset);
-      document.documentElement.style.setProperty(
-        "--android-navigation-offset",
-        `${offset}px`,
-      );
-    };
+    const updateOffset = () =>
+      setAndroidNavigationOffset(getAndroidNavigationOffset());
     updateOffset();
 
     window.visualViewport?.addEventListener("resize", updateOffset);
@@ -85,9 +79,6 @@ export function BottomNavigation({
       window.visualViewport?.removeEventListener("scroll", updateOffset);
       window.removeEventListener("resize", updateOffset);
       window.removeEventListener("orientationchange", updateOffset);
-      document.documentElement.style.removeProperty(
-        "--android-navigation-offset",
-      );
     };
   }, []);
 

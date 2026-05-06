@@ -61,7 +61,12 @@ export function HomeFxView({
             </div>
             <Switch checked={reverbEnabled} onCheckedChange={onToggleReverb} />
           </div>
-          <div className="flex justify-center">
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-2 text-[10px] uppercase tracking-[0.14em] text-zinc-500">
+              <p>{t("fx.reverbSpecOne")}</p>
+              <p>{t("fx.reverbSpecTwo")}</p>
+              <p>{t("fx.reverbSpecThree")}</p>
+            </div>
             <KnobControl
               label={t("fx.amount")}
               value={reverbAmount}
@@ -90,7 +95,12 @@ export function HomeFxView({
               onCheckedChange={onToggleConcertHall}
             />
           </div>
-          <div className="flex justify-center">
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-2 text-[10px] uppercase tracking-[0.14em] text-zinc-500">
+              <p>{t("fx.concertSpecOne")}</p>
+              <p>{t("fx.concertSpecTwo")}</p>
+              <p>{t("fx.concertSpecThree")}</p>
+            </div>
             <KnobControl
               label={t("fx.amount")}
               value={concertHallAmount}
@@ -104,32 +114,9 @@ export function HomeFxView({
           </div>
         </section>
 
-        <div className="space-y-3 px-2">
-          <p className="text-center text-xs text-zinc-600 px-4 leading-relaxed">
-            {t("fx.description")}
-          </p>
-          <div className="grid grid-cols-2 gap-3 text-center">
-            <div className="rounded-xl border border-white/5 bg-black/25 p-3">
-              <p className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">
-                {t("fx.reverbProfile")}
-              </p>
-              <p className="text-xs text-zinc-300 mt-1">
-                {t("fx.reverbProfileValue")}
-              </p>
-            </div>
-            <div className="rounded-xl border border-white/5 bg-black/25 p-3">
-              <p className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">
-                {t("fx.concertProfile")}
-              </p>
-              <p className="text-xs text-zinc-300 mt-1">
-                {t("fx.concertProfileValue")}
-              </p>
-            </div>
-          </div>
-          <p className="text-center text-[11px] text-zinc-700 px-4 leading-relaxed">
-            {t("fx.convolutionNote")}
-          </p>
-        </div>
+        <p className="text-center text-xs text-zinc-600 px-6 leading-relaxed">
+          {t("fx.description")}
+        </p>
       </div>
     </div>
   );

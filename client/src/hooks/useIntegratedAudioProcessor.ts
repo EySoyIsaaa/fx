@@ -69,117 +69,157 @@ export interface SpatialEffectsConfig {
 const clampEffectAmount = (value: number): number =>
   Math.max(0, Math.min(100, value));
 
-type SchroederReverbPreset = {
-  preDelaySeconds: number;
-  combDelaysMs: number[];
-  combFeedback: number;
-  dampingHz: number;
-  allPassDelaysMs: number[];
-  allPassFeedback: number;
-  outputGain: number;
-  bassShelfDb?: number;
-  bassShelfHz?: number;
-  highCutHz?: number;
+type SchroederCombFilter = {
+  delay: DelayNode;
+  feedback: GainNode;
+  damping: BiquadFilterNode;
+  tapGain: GainNode;
 };
 
-type SpatialEffectGraph = {
+type SchroederAllPassFilter = {
   input: GainNode;
   output: GainNode;
+  feedSum: GainNode;
+  delay: DelayNode;
+  feedback: GainNode;
+  feedForward: GainNode;
+};
+
+type SchroederReverbGraph = {
+  input: GainNode;
+  preDelay: DelayNode;
+  combs: SchroederCombFilter[];
+  combSum: GainNode;
+  allPasses: SchroederAllPassFilter[];
+  tone: BiquadFilterNode;
+  bassShelf?: BiquadFilterNode;
+  output: GainNode;
+};
+
+type SchroederReverbPreset = {
+  preDelayMs: number;
+  combDelaysMs: number[];
+  allPassDelaysMs: number[];
+  feedback: number;
+  dampingFrequency: number;
+  toneFrequency: number;
+  bassShelfGainDb?: number;
 };
 
 const createAllPassFilter = (
   ctx: AudioContext,
-  delaySeconds: number,
-  feedback: number,
-): SpatialEffectGraph => {
+  delayMs: number,
+  feedbackAmount: number,
+): SchroederAllPassFilter => {
   const input = ctx.createGain();
   const output = ctx.createGain();
-  const delay = ctx.createDelay(Math.max(0.02, delaySeconds * 2));
-  const inverseFeedForward = ctx.createGain();
-  const feedbackGain = ctx.createGain();
+  const feedSum = ctx.createGain();
+  const delay = ctx.createDelay(0.05);
+  const feedback = ctx.createGain();
+  const feedForward = ctx.createGain();
 
-  delay.delayTime.value = delaySeconds;
-  inverseFeedForward.gain.value = -feedback;
-  feedbackGain.gain.value = feedback;
+  delay.delayTime.value = delayMs / 1000;
+  feedback.gain.value = feedbackAmount;
+  feedForward.gain.value = -feedbackAmount;
 
-  input.connect(inverseFeedForward);
-  inverseFeedForward.connect(output);
-  input.connect(delay);
+  input.connect(feedForward);
+  feedForward.connect(output);
+  input.connect(feedSum);
+  feedSum.connect(delay);
   delay.connect(output);
-  output.connect(feedbackGain);
-  feedbackGain.connect(delay);
+  delay.connect(feedback);
+  feedback.connect(feedSum);
 
-  return { input, output };
+  return { input, output, feedSum, delay, feedback, feedForward };
 };
 
-const createSchroederReverb = (
+const createSchroederReverbGraph = (
   ctx: AudioContext,
   preset: SchroederReverbPreset,
-): SpatialEffectGraph => {
+): SchroederReverbGraph => {
   const input = ctx.createGain();
   const preDelay = ctx.createDelay(0.12);
   const combSum = ctx.createGain();
-  let chainInput: AudioNode = combSum;
+  const output = ctx.createGain();
 
-  preDelay.delayTime.value = preset.preDelaySeconds;
+  preDelay.delayTime.value = preset.preDelayMs / 1000;
   input.connect(preDelay);
 
-  for (const delayMs of preset.combDelaysMs) {
-    const delaySeconds = delayMs / 1000;
-    const combDelay = ctx.createDelay(Math.max(0.08, delaySeconds * 2));
-    const damping = ctx.createBiquadFilter();
+  const combs = preset.combDelaysMs.map((delayMs) => {
+    const delay = ctx.createDelay(0.12);
     const feedback = ctx.createGain();
+    const damping = ctx.createBiquadFilter();
+    const tapGain = ctx.createGain();
 
-    combDelay.delayTime.value = delaySeconds;
+    delay.delayTime.value = delayMs / 1000;
+    feedback.gain.value = -preset.feedback;
     damping.type = "lowpass";
-    damping.frequency.value = preset.dampingHz;
-    damping.Q.value = 0.65;
-    feedback.gain.value = preset.combFeedback;
+    damping.frequency.value = preset.dampingFrequency;
+    damping.Q.value = 0.707;
+    tapGain.gain.value = 1 / preset.combDelaysMs.length;
 
-    preDelay.connect(combDelay);
-    combDelay.connect(combSum);
-    combDelay.connect(damping);
+    preDelay.connect(delay);
+    delay.connect(damping);
     damping.connect(feedback);
-    feedback.connect(combDelay);
+    feedback.connect(delay);
+    delay.connect(tapGain);
+    tapGain.connect(combSum);
+
+    return { delay, feedback, damping, tapGain };
+  });
+
+  const allPasses = preset.allPassDelaysMs.map((delayMs) =>
+    createAllPassFilter(ctx, delayMs, 0.55),
+  );
+
+  let diffusionOutput: AudioNode = combSum;
+  for (const allPass of allPasses) {
+    diffusionOutput.connect(allPass.input);
+    diffusionOutput = allPass.output;
   }
 
-  combSum.gain.value = 1 / Math.max(1, preset.combDelaysMs.length);
+  const tone = ctx.createBiquadFilter();
+  tone.type = "lowpass";
+  tone.frequency.value = preset.toneFrequency;
+  tone.Q.value = 0.65;
 
-  for (const delayMs of preset.allPassDelaysMs) {
-    const allPass = createAllPassFilter(
-      ctx,
-      delayMs / 1000,
-      preset.allPassFeedback,
-    );
-    chainInput.connect(allPass.input);
-    chainInput = allPass.output;
-  }
+  diffusionOutput.connect(tone);
 
-  let outputSource: AudioNode = chainInput;
-
-  if (preset.bassShelfDb) {
-    const bassShelf = ctx.createBiquadFilter();
+  let finalToneNode: AudioNode = tone;
+  let bassShelf: BiquadFilterNode | undefined;
+  if (preset.bassShelfGainDb !== undefined) {
+    bassShelf = ctx.createBiquadFilter();
     bassShelf.type = "lowshelf";
-    bassShelf.frequency.value = preset.bassShelfHz ?? 180;
-    bassShelf.gain.value = preset.bassShelfDb;
-    outputSource.connect(bassShelf);
-    outputSource = bassShelf;
+    bassShelf.frequency.value = 180;
+    bassShelf.gain.value = preset.bassShelfGainDb;
+    tone.connect(bassShelf);
+    finalToneNode = bassShelf;
   }
 
-  if (preset.highCutHz) {
-    const highCut = ctx.createBiquadFilter();
-    highCut.type = "lowpass";
-    highCut.frequency.value = preset.highCutHz;
-    highCut.Q.value = 0.7;
-    outputSource.connect(highCut);
-    outputSource = highCut;
+  finalToneNode.connect(output);
+
+  return {
+    input,
+    preDelay,
+    combs,
+    combSum,
+    allPasses,
+    tone,
+    bassShelf,
+    output,
+  };
+};
+
+const setSchroederFeedback = (
+  graph: SchroederReverbGraph | null,
+  feedbackAmount: number,
+  ctx: AudioContext,
+) => {
+  if (!graph) return;
+
+  for (const comb of graph.combs) {
+    comb.feedback.gain.setTargetAtTime(-feedbackAmount, ctx.currentTime, 0.04);
   }
-
-  const output = ctx.createGain();
-  output.gain.value = preset.outputGain;
-  outputSource.connect(output);
-
-  return { input, output };
 };
 
 export const EQ_GAIN_MIN = -3;
@@ -252,9 +292,9 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
   const eqOutputGainRef = useRef<GainNode | null>(null);
   const effectsInputGainRef = useRef<GainNode | null>(null);
   const effectsDryGainRef = useRef<GainNode | null>(null);
-  const reverbGraphRef = useRef<SpatialEffectGraph | null>(null);
+  const reverbGraphRef = useRef<SchroederReverbGraph | null>(null);
   const reverbWetGainRef = useRef<GainNode | null>(null);
-  const concertHallGraphRef = useRef<SpatialEffectGraph | null>(null);
+  const concertHallGraphRef = useRef<SchroederReverbGraph | null>(null);
   const concertWetGainRef = useRef<GainNode | null>(null);
   const masterGainRef = useRef<GainNode | null>(null);
   const fixedChainConnectedRef = useRef(false);
@@ -357,30 +397,25 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
       effectsDryGainRef.current = ctx.createGain();
       effectsDryGainRef.current.gain.value = 1.0;
 
-      reverbGraphRef.current = createSchroederReverb(ctx, {
-        preDelaySeconds: 0.014,
-        combDelaysMs: [25.31, 26.94, 28.63, 30.47],
-        combFeedback: 0.62,
-        dampingHz: 6800,
-        allPassDelaysMs: [5.01, 7.07],
-        allPassFeedback: 0.54,
-        outputGain: 0.95,
-        highCutHz: 7600,
+      reverbGraphRef.current = createSchroederReverbGraph(ctx, {
+        preDelayMs: 14,
+        combDelaysMs: [19.37, 23.11, 29.17, 31.13],
+        allPassDelaysMs: [5.03, 7.07],
+        feedback: 0.62,
+        dampingFrequency: 5600,
+        toneFrequency: 7200,
       });
       reverbWetGainRef.current = ctx.createGain();
       reverbWetGainRef.current.gain.value = 0;
 
-      concertHallGraphRef.current = createSchroederReverb(ctx, {
-        preDelaySeconds: 0.038,
-        combDelaysMs: [29.73, 37.11, 41.43, 43.91],
-        combFeedback: 0.85,
-        dampingHz: 5200,
-        allPassDelaysMs: [9.83, 13.67],
-        allPassFeedback: 0.62,
-        outputGain: 0.85,
-        bassShelfDb: 1.8,
-        bassShelfHz: 180,
-        highCutHz: 6200,
+      concertHallGraphRef.current = createSchroederReverbGraph(ctx, {
+        preDelayMs: 35,
+        combDelaysMs: [25.31, 26.94, 28.63, 30.47],
+        allPassDelaysMs: [5.0, 7.0],
+        feedback: 0.76,
+        dampingFrequency: 4300,
+        toneFrequency: 6200,
+        bassShelfGainDb: 1.8,
       });
       concertWetGainRef.current = ctx.createGain();
       concertWetGainRef.current.gain.value = 0;
@@ -518,24 +553,27 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
     )
       return;
 
-    const reverbWet = config.reverbEnabled
-      ? (clampEffectAmount(config.reverbAmount) / 100) * 0.42
-      : 0;
-    const concertWet = config.concertHallEnabled
-      ? (clampEffectAmount(config.concertHallAmount) / 100) * 0.52
-      : 0;
-    const dry = Math.max(0.58, 1 - reverbWet * 0.28 - concertWet * 0.35);
+    const reverbAmount = clampEffectAmount(config.reverbAmount) / 100;
+    const concertAmount = clampEffectAmount(config.concertHallAmount) / 100;
+    const reverbWet = config.reverbEnabled ? reverbAmount * 0.34 : 0;
+    const concertWet = config.concertHallEnabled ? concertAmount * 0.42 : 0;
+    const dry = Math.max(0.64, 1 - reverbWet * 0.22 - concertWet * 0.3);
     const rampTime = ctx.currentTime + 0.06;
 
-    for (const param of [
-      effectsDryGainRef.current.gain,
-      reverbWetGainRef.current.gain,
-      concertWetGainRef.current.gain,
-    ]) {
-      param.cancelScheduledValues(ctx.currentTime);
-      param.setValueAtTime(param.value, ctx.currentTime);
-    }
+    setSchroederFeedback(
+      reverbGraphRef.current,
+      0.58 + reverbAmount * 0.16,
+      ctx,
+    );
+    setSchroederFeedback(
+      concertHallGraphRef.current,
+      0.76 + concertAmount * 0.14,
+      ctx,
+    );
 
+    effectsDryGainRef.current.gain.cancelScheduledValues(ctx.currentTime);
+    reverbWetGainRef.current.gain.cancelScheduledValues(ctx.currentTime);
+    concertWetGainRef.current.gain.cancelScheduledValues(ctx.currentTime);
     effectsDryGainRef.current.gain.linearRampToValueAtTime(dry, rampTime);
     reverbWetGainRef.current.gain.linearRampToValueAtTime(reverbWet, rampTime);
     concertWetGainRef.current.gain.linearRampToValueAtTime(
