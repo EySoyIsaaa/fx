@@ -81,18 +81,21 @@ type SchroederAllPassFilter = {
   output: GainNode;
   feedSum: GainNode;
   delay: DelayNode;
+  inputToFeedSum: GainNode;
   feedback: GainNode;
   feedForward: GainNode;
 };
 
 type SchroederReverbGraph = {
   input: GainNode;
+  inputGate: GainNode;
   preDelay: DelayNode;
   combs: SchroederCombFilter[];
   combSum: GainNode;
   allPasses: SchroederAllPassFilter[];
   tone: BiquadFilterNode;
   bassShelf?: BiquadFilterNode;
+  wetLimiter: WaveShaperNode;
   output: GainNode;
 };
 
@@ -103,7 +106,22 @@ type SchroederReverbPreset = {
   feedback: number;
   dampingFrequency: number;
   toneFrequency: number;
+  allPassFeedback: number;
   bassShelfGainDb?: number;
+};
+
+const clamp = (value: number, min: number, max: number): number =>
+  Math.max(min, Math.min(max, value));
+
+const createSoftClipCurve = (samples = 2048): Float32Array<ArrayBuffer> => {
+  const curve = new Float32Array(
+    new ArrayBuffer(samples * Float32Array.BYTES_PER_ELEMENT),
+  );
+  for (let i = 0; i < samples; i += 1) {
+    const x = (i / (samples - 1)) * 4 - 2;
+    curve[i] = Math.tanh(x);
+  }
+  return curve;
 };
 
 const createAllPassFilter = (
@@ -115,22 +133,34 @@ const createAllPassFilter = (
   const output = ctx.createGain();
   const feedSum = ctx.createGain();
   const delay = ctx.createDelay(0.05);
+  const inputToFeedSum = ctx.createGain();
   const feedback = ctx.createGain();
   const feedForward = ctx.createGain();
 
+  const g = clamp(feedbackAmount, 0.3, 0.55);
   delay.delayTime.value = delayMs / 1000;
-  feedback.gain.value = feedbackAmount;
-  feedForward.gain.value = -feedbackAmount;
+  feedback.gain.value = g;
+  feedForward.gain.value = -g;
+  inputToFeedSum.gain.value = 1 - g * g;
 
   input.connect(feedForward);
   feedForward.connect(output);
-  input.connect(feedSum);
+  input.connect(inputToFeedSum);
+  inputToFeedSum.connect(feedSum);
   feedSum.connect(delay);
   delay.connect(output);
   delay.connect(feedback);
   feedback.connect(feedSum);
 
-  return { input, output, feedSum, delay, feedback, feedForward };
+  return {
+    input,
+    output,
+    feedSum,
+    delay,
+    inputToFeedSum,
+    feedback,
+    feedForward,
+  };
 };
 
 const createSchroederReverbGraph = (
@@ -138,12 +168,15 @@ const createSchroederReverbGraph = (
   preset: SchroederReverbPreset,
 ): SchroederReverbGraph => {
   const input = ctx.createGain();
+  const inputGate = ctx.createGain();
   const preDelay = ctx.createDelay(0.12);
   const combSum = ctx.createGain();
   const output = ctx.createGain();
 
   preDelay.delayTime.value = preset.preDelayMs / 1000;
-  input.connect(preDelay);
+  inputGate.gain.value = 1;
+  input.connect(inputGate);
+  inputGate.connect(preDelay);
 
   const combs = preset.combDelaysMs.map((delayMs) => {
     const delay = ctx.createDelay(0.12);
@@ -152,7 +185,7 @@ const createSchroederReverbGraph = (
     const tapGain = ctx.createGain();
 
     delay.delayTime.value = delayMs / 1000;
-    feedback.gain.value = -preset.feedback;
+    feedback.gain.value = clamp(preset.feedback, 0, 0.75);
     damping.type = "lowpass";
     damping.frequency.value = preset.dampingFrequency;
     damping.Q.value = 0.707;
@@ -169,7 +202,7 @@ const createSchroederReverbGraph = (
   });
 
   const allPasses = preset.allPassDelaysMs.map((delayMs) =>
-    createAllPassFilter(ctx, delayMs, 0.55),
+    createAllPassFilter(ctx, delayMs, preset.allPassFeedback),
   );
 
   let diffusionOutput: AudioNode = combSum;
@@ -196,16 +229,23 @@ const createSchroederReverbGraph = (
     finalToneNode = bassShelf;
   }
 
-  finalToneNode.connect(output);
+  const wetLimiter = ctx.createWaveShaper();
+  wetLimiter.curve = createSoftClipCurve();
+  wetLimiter.oversample = "2x";
+
+  finalToneNode.connect(wetLimiter);
+  wetLimiter.connect(output);
 
   return {
     input,
+    inputGate,
     preDelay,
     combs,
     combSum,
     allPasses,
     tone,
     bassShelf,
+    wetLimiter,
     output,
   };
 };
@@ -217,13 +257,23 @@ const setSchroederFeedback = (
 ) => {
   if (!graph) return;
 
+  graph.inputGate.gain.setTargetAtTime(
+    feedbackAmount > 0 ? 1 : 0,
+    ctx.currentTime,
+    0.025,
+  );
+
   for (const comb of graph.combs) {
-    comb.feedback.gain.setTargetAtTime(-feedbackAmount, ctx.currentTime, 0.04);
+    comb.feedback.gain.setTargetAtTime(
+      clamp(feedbackAmount, 0, 0.75),
+      ctx.currentTime,
+      0.04,
+    );
   }
 };
 
-export const EQ_GAIN_MIN = -3;
-export const EQ_GAIN_MAX = 3;
+export const EQ_GAIN_MIN = -8;
+export const EQ_GAIN_MAX = 8;
 
 const EQ_31_FREQUENCIES = [
   20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630,
@@ -296,6 +346,9 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
   const reverbWetGainRef = useRef<GainNode | null>(null);
   const concertHallGraphRef = useRef<SchroederReverbGraph | null>(null);
   const concertWetGainRef = useRef<GainNode | null>(null);
+  const concertSafetyAnalyserRef = useRef<AnalyserNode | null>(null);
+  const concertSafetyTimerRef = useRef<number | null>(null);
+  const concertSafetyMuteUntilRef = useRef(0);
   const masterGainRef = useRef<GainNode | null>(null);
   const fixedChainConnectedRef = useRef(false);
   const bypassConnectionRef = useRef<boolean>(false);
@@ -362,9 +415,75 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
   }, [epicenterEnabled]);
 
   useEffect(() => {
+    const wetWindow = new Float32Array(256);
+    let unsafeSamples = 0;
+
+    concertSafetyTimerRef.current = window.setInterval(() => {
+      const ctx = audioContextRef.current;
+      const analyser = concertSafetyAnalyserRef.current;
+      if (!ctx || !analyser) return;
+
+      analyser.getFloatTimeDomainData(wetWindow);
+      let peak = 0;
+      let nanDetected = false;
+      for (let i = 0; i < wetWindow.length; i += 1) {
+        const sample = wetWindow[i];
+        if (!Number.isFinite(sample)) {
+          nanDetected = true;
+          break;
+        }
+        peak = Math.max(peak, Math.abs(sample));
+      }
+
+      unsafeSamples = nanDetected || peak > 1.2 ? unsafeSamples + 1 : 0;
+      const safetyMute = unsafeSamples >= 3;
+
+      if (safetyMute) {
+        concertSafetyMuteUntilRef.current = ctx.currentTime + 1.5;
+        setSchroederFeedback(concertHallGraphRef.current, 0, ctx);
+        if (concertWetGainRef.current) {
+          concertWetGainRef.current.gain.cancelScheduledValues(ctx.currentTime);
+          concertWetGainRef.current.gain.setValueAtTime(0, ctx.currentTime);
+        }
+        unsafeSamples = 0;
+      }
+
+      if (spatialEffectsRef.current.concertHallEnabled || safetyMute) {
+        console.debug("[ConcertHallDiagnostics]", {
+          concertHallWetPeak: peak,
+          concertHallFeedback: safetyMute
+            ? 0
+            : 0.58 +
+              (clampEffectAmount(spatialEffectsRef.current.concertHallAmount) /
+                100) *
+                0.1,
+          concertHallDelaySamples: concertHallGraphRef.current
+            ? concertHallGraphRef.current.combs.map((comb) =>
+                Math.round(comb.delay.delayTime.value * ctx.sampleRate),
+              )
+            : [],
+          concertHallNaNDetected: nanDetected,
+          concertHallSafetyMute: safetyMute,
+        });
+      }
+    }, 250);
+
+    return () => {
+      if (concertSafetyTimerRef.current !== null) {
+        window.clearInterval(concertSafetyTimerRef.current);
+        concertSafetyTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     return () => {
       if (crossfadeTimeoutRef.current) {
         clearTimeout(crossfadeTimeoutRef.current);
+      }
+      if (concertSafetyTimerRef.current !== null) {
+        window.clearInterval(concertSafetyTimerRef.current);
+        concertSafetyTimerRef.current = null;
       }
       if (objectUrlRef.current) {
         URL.revokeObjectURL(objectUrlRef.current);
@@ -404,6 +523,7 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
         feedback: 0.62,
         dampingFrequency: 5600,
         toneFrequency: 7200,
+        allPassFeedback: 0.5,
       });
       reverbWetGainRef.current = ctx.createGain();
       reverbWetGainRef.current.gain.value = 0;
@@ -412,13 +532,16 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
         preDelayMs: 35,
         combDelaysMs: [25.31, 26.94, 28.63, 30.47],
         allPassDelaysMs: [5.0, 7.0],
-        feedback: 0.76,
-        dampingFrequency: 4300,
+        feedback: 0.58,
+        dampingFrequency: 5600,
         toneFrequency: 6200,
-        bassShelfGainDb: 1.8,
+        allPassFeedback: 0.42,
       });
       concertWetGainRef.current = ctx.createGain();
       concertWetGainRef.current.gain.value = 0;
+
+      concertSafetyAnalyserRef.current = ctx.createAnalyser();
+      concertSafetyAnalyserRef.current.fftSize = 256;
     }
 
     if (!analyserNodeRef.current) {
@@ -537,6 +660,11 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
       reverbWetGainRef.current.connect(masterGainRef.current);
       effectsInputGainRef.current.connect(concertHallGraphRef.current.input);
       concertHallGraphRef.current.output.connect(concertWetGainRef.current);
+      if (concertSafetyAnalyserRef.current) {
+        concertHallGraphRef.current.output.connect(
+          concertSafetyAnalyserRef.current,
+        );
+      }
       concertWetGainRef.current.connect(masterGainRef.current);
       masterGainRef.current.connect(ctx.destination);
       fixedChainConnectedRef.current = true;
@@ -556,8 +684,10 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
     const reverbAmount = clampEffectAmount(config.reverbAmount) / 100;
     const concertAmount = clampEffectAmount(config.concertHallAmount) / 100;
     const reverbWet = config.reverbEnabled ? reverbAmount * 0.34 : 0;
-    const concertWet = config.concertHallEnabled ? concertAmount * 0.42 : 0;
-    const dry = Math.max(0.64, 1 - reverbWet * 0.22 - concertWet * 0.3);
+    const safetyMuted = ctx.currentTime < concertSafetyMuteUntilRef.current;
+    const concertWet =
+      config.concertHallEnabled && !safetyMuted ? concertAmount * 0.28 : 0;
+    const dry = Math.max(0.86, 1 - reverbWet * 0.18 - concertWet * 0.24);
     const rampTime = ctx.currentTime + 0.06;
 
     setSchroederFeedback(
@@ -567,7 +697,9 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
     );
     setSchroederFeedback(
       concertHallGraphRef.current,
-      0.76 + concertAmount * 0.14,
+      config.concertHallEnabled && !safetyMuted
+        ? 0.58 + concertAmount * 0.1
+        : 0,
       ctx,
     );
 
@@ -580,6 +712,21 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
       concertWet,
       rampTime,
     );
+
+    console.debug("[ConcertHallDiagnostics]", {
+      concertHallWetPeak: null,
+      concertHallFeedback:
+        config.concertHallEnabled && !safetyMuted
+          ? 0.58 + concertAmount * 0.1
+          : 0,
+      concertHallDelaySamples: concertHallGraphRef.current
+        ? concertHallGraphRef.current.combs.map((comb) =>
+            Math.round(comb.delay.delayTime.value * ctx.sampleRate),
+          )
+        : [],
+      concertHallNaNDetected: false,
+      concertHallSafetyMute: safetyMuted,
+    });
   }, []);
 
   // Función para reconectar la cadena según el estado de los efectos
