@@ -10,7 +10,7 @@
     "dsp": "DSP",
     "settings": "Ajustes",
     "search": "Buscar",
-    "effects": "FX"
+    "fx": "FX"
   },
   "player": {
     "nowPlaying": "Ahora Suena",
@@ -157,6 +157,23 @@
     "autoEnable": "Activar ajuste automático por canción",
     "autoApplyNow": "Analizar y aplicar ahora"
   },
+  "fx": {
+    "title": "Efectos espaciales",
+    "subtitle": "Reverb y sala de concierto",
+    "on": "On",
+    "off": "Off",
+    "reverb": "Reverb",
+    "concertHall": "Concert Hall",
+    "amount": "AMOUNT",
+    "reverbDescription": "Agrega reflexiones suaves para dar profundidad y amplitud al audio sin cambiar de pista.",
+    "concertHallDescription": "Simula un recinto grande diseñado para música en vivo, con cola más larga, pre-delay y reflejos densos.",
+    "description": "Los dos efectos usan un reverberador Schroeder ligero: filtros de peine en paralelo, dos all-pass, damping de agudos y mezcla dry/wet para mantener claridad en el carro.",
+    "reverbProfile": "Perfil",
+    "reverbProfileValue": "cola corta · mix controlado",
+    "concertProfile": "Hall",
+    "concertProfileValue": "38 ms pre-delay · 1.5–2 s",
+    "convolutionNote": "Un Concert Hall real con IR/convolución requiere medir una sala y corregir el habitáculo; este modo emula esa idea en tiempo real sin archivos externos."
+  },
   "settings": {
     "title": "Ajustes",
     "appearance": "Apariencia",
@@ -261,17 +278,5 @@
     "globalPlaceholder": "Buscar en toda la biblioteca...",
     "startTyping": "Escribe para buscar en toda tu biblioteca",
     "noResults": "No se encontraron resultados"
-  },
-  "effects": {
-    "title": "Efectos FX",
-    "subtitle": "Espacio y ambiente en tiempo real",
-    "live": "Tiempo real",
-    "reverb": "Reverb",
-    "reverbAmount": "REVERB",
-    "reverbDescription": "Añade reflexiones cortas para dar profundidad y anchura sin alejar demasiado la mezcla.",
-    "concertHall": "Concert Hall",
-    "concertHallAmount": "HALL",
-    "concertHallDescription": "Simula una sala de conciertos grande con cola más larga, difusión suave y sensación envolvente.",
-    "description": "Concert Hall es una reverb tipo hall: emula las reflexiones y la caída natural de espacios grandes como auditorios o teatros."
   }
 }

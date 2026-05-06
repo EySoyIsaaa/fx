@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { ReverbEffectConfig, StreamingParams } from './useIntegratedAudioProcessor';
+import { StreamingParams } from './useIntegratedAudioProcessor';
 
 export interface EQPreset {
   id: string;
@@ -85,16 +85,11 @@ export function usePresetPersistence() {
     }
   };
 
-  const saveLastConfig = (
-    eqBands: number[],
-    dspParams: StreamingParams,
-    effectParams?: ReverbEffectConfig,
-  ) => {
+  const saveLastConfig = (eqBands: number[], dspParams: StreamingParams) => {
     try {
       const config = {
         eqBands,
         dspParams,
-        effectParams,
         timestamp: Date.now(),
       };
       localStorage.setItem(STORAGE_KEY_LAST_CONFIG, JSON.stringify(config));
@@ -103,11 +98,7 @@ export function usePresetPersistence() {
     }
   };
 
-  const getLastConfig = (): {
-    eqBands: number[];
-    dspParams: StreamingParams;
-    effectParams?: ReverbEffectConfig;
-  } | null => {
+  const getLastConfig = (): { eqBands: number[]; dspParams: StreamingParams } | null => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY_LAST_CONFIG);
       if (stored) {

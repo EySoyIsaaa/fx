@@ -1,3 +1,4 @@
+import { useEffect, useState, type CSSProperties } from "react";
 import {
   Disc3,
   Library,
@@ -5,16 +6,16 @@ import {
   Settings,
   SlidersHorizontal,
   Waves,
-} from 'lucide-react';
+} from "lucide-react";
 
 type TabType =
-  | 'player'
-  | 'library'
-  | 'search'
-  | 'eq'
-  | 'dsp'
-  | 'effects'
-  | 'settings';
+  | "player"
+  | "library"
+  | "search"
+  | "eq"
+  | "dsp"
+  | "fx"
+  | "settings";
 
 type BottomNavigationProps = {
   activeTab: TabType;
@@ -22,13 +23,35 @@ type BottomNavigationProps = {
   onLibraryTab: () => void;
   eqEnabled: boolean;
   epicenterEnabled: boolean;
-  effectsEnabled: boolean;
+  spatialEffectsEnabled: boolean;
   t: (key: string) => string;
 };
 
-const renderActiveDot = () => (
-  <span className="absolute top-1 right-2 w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_6px_rgba(255,255,255,0.8)]" />
-);
+const getAndroidNavigationOffset = () => {
+  if (typeof window === "undefined") return 0;
+
+  const userAgent = window.navigator.userAgent.toLowerCase();
+  const isAndroid = userAgent.includes("android");
+  const hasTouch = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+  if (!isAndroid || !hasTouch) return 0;
+
+  const viewportGap = window.visualViewport
+    ? Math.max(
+        0,
+        window.innerHeight -
+          window.visualViewport.height -
+          window.visualViewport.offsetTop,
+      )
+    : 0;
+  const screenGap = Math.max(0, window.screen.height - window.innerHeight);
+  const detectedGap = Math.max(viewportGap, screenGap);
+
+  if (detectedGap >= 24) return Math.min(34, detectedGap);
+
+  // Some Android WebViews report a zero safe-area even when the 3-button
+  // navigation bar overlays the bottom edge, so reserve a small lift.
+  return 16;
+};
 
 export function BottomNavigation({
   activeTab,
@@ -36,47 +59,86 @@ export function BottomNavigation({
   onLibraryTab,
   eqEnabled,
   epicenterEnabled,
-  effectsEnabled,
+  spatialEffectsEnabled,
   t,
 }: BottomNavigationProps) {
-  const navButtonClass = (tab: TabType, extra = '') =>
+  const [androidNavigationOffset, setAndroidNavigationOffset] = useState(0);
+
+  useEffect(() => {
+    const updateOffset = () => {
+      const offset = getAndroidNavigationOffset();
+      setAndroidNavigationOffset(offset);
+      document.documentElement.style.setProperty(
+        "--android-navigation-offset",
+        `${offset}px`,
+      );
+    };
+    updateOffset();
+
+    window.visualViewport?.addEventListener("resize", updateOffset);
+    window.visualViewport?.addEventListener("scroll", updateOffset);
+    window.addEventListener("resize", updateOffset);
+    window.addEventListener("orientationchange", updateOffset);
+
+    return () => {
+      window.visualViewport?.removeEventListener("resize", updateOffset);
+      window.visualViewport?.removeEventListener("scroll", updateOffset);
+      window.removeEventListener("resize", updateOffset);
+      window.removeEventListener("orientationchange", updateOffset);
+      document.documentElement.style.removeProperty(
+        "--android-navigation-offset",
+      );
+    };
+  }, []);
+
+  const indicator =
+    "absolute top-1 right-2 w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_6px_rgba(255,255,255,0.8)]";
+  const itemClass = (tab: TabType, extra = "") =>
     `flex flex-col items-center gap-1 px-2 py-2 transition-colors ${extra} ${
-      activeTab === tab ? 'text-white' : 'text-zinc-600'
+      activeTab === tab ? "text-white" : "text-zinc-600"
     }`;
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 flex items-center justify-around px-2 py-3 border-t border-zinc-900 bg-black/95 backdrop-blur-xl z-50 safe-area-bottom navigation-bar-bottom">
+    <nav
+      className="fixed left-0 right-0 flex items-center justify-around px-2 pt-3 border-t border-zinc-900 bg-black/95 backdrop-blur-xl z-50 bottom-nav-safe"
+      style={
+        {
+          bottom: `${androidNavigationOffset}px`,
+          "--android-navigation-offset": `${androidNavigationOffset}px`,
+        } as CSSProperties
+      }
+    >
       <button
-        onClick={() => onTabChange('player')}
-        className={navButtonClass('player')}
+        onClick={() => onTabChange("player")}
+        className={itemClass("player")}
       >
         <Disc3 className="w-5 h-5" strokeWidth={1.5} />
-        <span className="text-[9px] font-medium">{t('tabs.now')}</span>
+        <span className="text-[10px] font-medium">{t("tabs.now")}</span>
       </button>
-      <button onClick={onLibraryTab} className={navButtonClass('library')}>
+      <button onClick={onLibraryTab} className={itemClass("library")}>
         <Library className="w-5 h-5" strokeWidth={1.5} />
-        <span className="text-[9px] font-medium">{t('tabs.library')}</span>
+        <span className="text-[10px] font-medium">{t("tabs.library")}</span>
       </button>
       <button
-        onClick={() => onTabChange('search')}
-        className={navButtonClass('search')}
+        onClick={() => onTabChange("search")}
+        className={itemClass("search")}
       >
         <Search className="w-5 h-5" strokeWidth={1.5} />
-        <span className="text-[9px] font-medium">{t('tabs.search')}</span>
+        <span className="text-[10px] font-medium">{t("tabs.search")}</span>
       </button>
       <button
-        onClick={() => onTabChange('eq')}
-        className={navButtonClass('eq', 'relative')}
+        onClick={() => onTabChange("eq")}
+        className={itemClass("eq", "relative")}
       >
-        {eqEnabled && renderActiveDot()}
+        {eqEnabled && <span className={indicator} />}
         <SlidersHorizontal className="w-5 h-5" strokeWidth={1.5} />
-        <span className="text-[9px] font-medium">{t('tabs.eq')}</span>
+        <span className="text-[10px] font-medium">{t("tabs.eq")}</span>
       </button>
       <button
-        onClick={() => onTabChange('dsp')}
-        className={navButtonClass('dsp', 'relative')}
+        onClick={() => onTabChange("dsp")}
+        className={itemClass("dsp", "relative")}
       >
-        {epicenterEnabled && renderActiveDot()}
+        {epicenterEnabled && <span className={indicator} />}
         <svg
           className="w-5 h-5"
           viewBox="0 0 24 24"
@@ -88,22 +150,22 @@ export function BottomNavigation({
           <path d="M12 2v4m0 12v4M2 12h4m12 0h4" />
           <path d="M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83" />
         </svg>
-        <span className="text-[9px] font-medium">{t('tabs.dsp')}</span>
+        <span className="text-[10px] font-medium">{t("tabs.dsp")}</span>
       </button>
       <button
-        onClick={() => onTabChange('effects')}
-        className={navButtonClass('effects', 'relative')}
+        onClick={() => onTabChange("fx")}
+        className={itemClass("fx", "relative")}
       >
-        {effectsEnabled && renderActiveDot()}
+        {spatialEffectsEnabled && <span className={indicator} />}
         <Waves className="w-5 h-5" strokeWidth={1.5} />
-        <span className="text-[9px] font-medium">{t('tabs.effects')}</span>
+        <span className="text-[10px] font-medium">{t("tabs.fx")}</span>
       </button>
       <button
-        onClick={() => onTabChange('settings')}
-        className={navButtonClass('settings')}
+        onClick={() => onTabChange("settings")}
+        className={itemClass("settings")}
       >
         <Settings className="w-5 h-5" strokeWidth={1.5} />
-        <span className="text-[9px] font-medium">{t('tabs.settings')}</span>
+        <span className="text-[10px] font-medium">{t("tabs.settings")}</span>
       </button>
     </nav>
   );

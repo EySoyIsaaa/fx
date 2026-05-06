@@ -12,7 +12,6 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
   useIntegratedAudioProcessor,
-  type ReverbEffectConfig,
   type StreamingParams,
 } from "@/hooks/useIntegratedAudioProcessor";
 import {
@@ -41,8 +40,8 @@ import {
   TrackContextMenu,
 } from "@/components/home/HomeOverlays";
 import { HomeDspView } from "@/components/home/HomeDspView";
-import { HomeEffectsView } from "@/components/home/HomeEffectsView";
 import { HomeEqView } from "@/components/home/HomeEqView";
+import { HomeFxView } from "@/components/home/HomeFxView";
 import { HomeImportProgressOverlay } from "@/components/home/HomeImportProgressOverlay";
 import { HomeLibraryView } from "@/components/home/HomeLibraryView";
 import { HomePlayerView } from "@/components/home/HomePlayerView";
@@ -50,7 +49,6 @@ import { HomeSearchView } from "@/components/home/HomeSearchView";
 import { HomeSettingsView } from "@/components/home/HomeSettingsView";
 import {
   type DspParamConfig,
-  type EffectParamConfig,
   type HomeLibraryView as LibraryView,
   type HomeTabType as TabType,
 } from "@/components/home/types";
@@ -121,42 +119,6 @@ export default function Home() {
   // Solicitar permiso de notificaciones en Android 13+
   useNotificationPermission();
 
-  useEffect(() => {
-    const updateNavigationBarOffset = () => {
-      const isAndroid = /Android/i.test(navigator.userAgent);
-      const visualViewport = window.visualViewport;
-      const viewportHeight = visualViewport?.height ?? window.innerHeight;
-      const keyboardLikelyOpen = window.innerHeight - viewportHeight > 120;
-      const screenHeightCssPx = window.screen.height;
-      const systemBarGap = Math.max(0, screenHeightCssPx - viewportHeight);
-      const hasBottomNavigationBar =
-        isAndroid && !keyboardLikelyOpen && systemBarGap < 24;
-
-      document.documentElement.style.setProperty(
-        "--android-navigation-bar-offset",
-        hasBottomNavigationBar ? "28px" : "0px",
-      );
-    };
-
-    updateNavigationBarOffset();
-    window.addEventListener("resize", updateNavigationBarOffset);
-    window.visualViewport?.addEventListener(
-      "resize",
-      updateNavigationBarOffset,
-    );
-
-    return () => {
-      window.removeEventListener("resize", updateNavigationBarOffset);
-      window.visualViewport?.removeEventListener(
-        "resize",
-        updateNavigationBarOffset,
-      );
-      document.documentElement.style.removeProperty(
-        "--android-navigation-bar-offset",
-      );
-    };
-  }, []);
-
   const [activeTab, setActiveTab] = useState<TabType>("player");
   const [libraryView, setLibraryView] = useState<LibraryView>("main");
   const [songSort, setSongSort] = useState<"default" | "name" | "artist">(
@@ -173,12 +135,6 @@ export default function Home() {
     volume: 100,
   });
   const epicenterEnabled = audioProcessor.epicenterEnabled;
-  const [effectParams, setEffectParams] = useState<ReverbEffectConfig>({
-    reverbEnabled: false,
-    reverbAmount: 25,
-    concertHallEnabled: false,
-    concertHallAmount: 35,
-  });
   const [eqAutoEnabled, setEqAutoEnabled] = useState(false);
   const [dspAutoEnabled, setDspAutoEnabled] = useState(false);
   const [showEqAutoModal, setShowEqAutoModal] = useState(false);
@@ -314,25 +270,6 @@ export default function Home() {
     const lastConfig = presetManager.getLastConfig();
     if (lastConfig) {
       setDspParams(clampDspParams(lastConfig.dspParams));
-      if (lastConfig.effectParams) {
-        const nextEffects = {
-          reverbEnabled: !!lastConfig.effectParams.reverbEnabled,
-          reverbAmount: Math.max(
-            0,
-            Math.min(100, lastConfig.effectParams.reverbAmount ?? 25),
-          ),
-          concertHallEnabled: !!lastConfig.effectParams.concertHallEnabled,
-          concertHallAmount: Math.max(
-            0,
-            Math.min(100, lastConfig.effectParams.concertHallAmount ?? 35),
-          ),
-        };
-        setEffectParams(nextEffects);
-        audioProcessor.setReverbAmount(nextEffects.reverbAmount);
-        audioProcessor.setConcertHallAmount(nextEffects.concertHallAmount);
-        audioProcessor.setReverbEnabled(nextEffects.reverbEnabled);
-        audioProcessor.setConcertHallEnabled(nextEffects.concertHallEnabled);
-      }
       audioProcessor.eqBands.forEach((_, index) => {
         audioProcessor.setEqBandGain(index, lastConfig.eqBands[index] || 0);
       });
@@ -439,11 +376,10 @@ export default function Home() {
       presetManager.saveLastConfig(
         audioProcessor.eqBands.map((b) => b.gain),
         dspParams,
-        effectParams,
       );
     }, 500);
     return () => clearTimeout(timer);
-  }, [dspParams, effectParams, audioProcessor.eqBands]);
+  }, [dspParams, audioProcessor.eqBands]);
 
   const clearPendingPlaybackTimers = useCallback(() => {
     if (playTimeoutRef.current !== null) {
@@ -465,7 +401,9 @@ export default function Home() {
 
         const stableLibraryTrack =
           (track.sourceTrackId
-            ? queue.library.find((libraryTrack) => libraryTrack.id === track.sourceTrackId)
+            ? queue.library.find(
+                (libraryTrack) => libraryTrack.id === track.sourceTrackId,
+              )
             : null) ??
           queue.library.find(
             (libraryTrack) =>
@@ -550,7 +488,8 @@ export default function Home() {
       currentTrackRef.current = null;
       console.error("Playback runtime error:", error);
 
-      const movedToNextTrack = playNextAvailableTrackAfterFailure(failedTrackId);
+      const movedToNextTrack =
+        playNextAvailableTrackAfterFailure(failedTrackId);
       if (movedToNextTrack) {
         toast.error(t("actions.errorLoadingTrackSkipped"));
       } else {
@@ -845,38 +784,6 @@ export default function Home() {
       }
     },
     [audioProcessor, epicenterEnabled],
-  );
-
-  const updateEffectParam = useCallback(
-    (
-      key: keyof Pick<ReverbEffectConfig, "reverbAmount" | "concertHallAmount">,
-      value: number,
-    ) => {
-      const clampedValue = Math.max(0, Math.min(100, value));
-      setEffectParams((prev) => ({ ...prev, [key]: clampedValue }));
-      if (key === "reverbAmount") {
-        audioProcessor.setReverbAmount(clampedValue);
-      } else {
-        audioProcessor.setConcertHallAmount(clampedValue);
-      }
-    },
-    [audioProcessor],
-  );
-
-  const toggleReverb = useCallback(
-    (enabled: boolean) => {
-      setEffectParams((prev) => ({ ...prev, reverbEnabled: enabled }));
-      audioProcessor.setReverbEnabled(enabled);
-    },
-    [audioProcessor],
-  );
-
-  const toggleConcertHall = useCallback(
-    (enabled: boolean) => {
-      setEffectParams((prev) => ({ ...prev, concertHallEnabled: enabled }));
-      audioProcessor.setConcertHallEnabled(enabled);
-    },
-    [audioProcessor],
   );
 
   const toggleEq = useCallback(
@@ -1205,12 +1112,11 @@ export default function Home() {
         setShowDuplicatesModal([]);
       }
 
-      const snapshotPlaylist =
-        snapshot.selectedPlaylistId
-          ? playlistManager.playlists.find(
-              (playlist) => playlist.id === snapshot.selectedPlaylistId,
-            ) ?? null
-          : null;
+      const snapshotPlaylist = snapshot.selectedPlaylistId
+        ? (playlistManager.playlists.find(
+            (playlist) => playlist.id === snapshot.selectedPlaylistId,
+          ) ?? null)
+        : null;
 
       if (snapshot.libraryView === "playlist-detail" && !snapshotPlaylist) {
         setLibraryView("playlists");
@@ -1263,9 +1169,9 @@ export default function Home() {
 
   useEffect(() => {
     const onPopState = (event: PopStateEvent) => {
-      const navigationSnapshot = event.state?.[
-        HOME_NAVIGATION_STATE_KEY
-      ] as HomeNavigationSnapshot | undefined;
+      const navigationSnapshot = event.state?.[HOME_NAVIGATION_STATE_KEY] as
+        | HomeNavigationSnapshot
+        | undefined;
 
       if (!navigationSnapshot) {
         return;
@@ -1337,34 +1243,6 @@ export default function Home() {
       },
     ],
     [dspParams, epicenterEnabled, t, updateDspParam],
-  );
-
-  const effectControls = useMemo<EffectParamConfig[]>(
-    () => [
-      {
-        key: "reverbAmount",
-        label: t("effects.reverbAmount"),
-        value: effectParams.reverbAmount,
-        min: 0,
-        max: 100,
-        step: 1,
-        unit: "%",
-        onChange: (value) => updateEffectParam("reverbAmount", value),
-        disabled: !effectParams.reverbEnabled,
-      },
-      {
-        key: "concertHallAmount",
-        label: t("effects.concertHallAmount"),
-        value: effectParams.concertHallAmount,
-        min: 0,
-        max: 100,
-        step: 1,
-        unit: "%",
-        onChange: (value) => updateEffectParam("concertHallAmount", value),
-        disabled: !effectParams.concertHallEnabled,
-      },
-    ],
-    [effectParams, t, updateEffectParam],
   );
 
   return (
@@ -1595,14 +1473,17 @@ export default function Home() {
         />
       )}
 
-      {activeTab === "effects" && (
-        <HomeEffectsView
+      {activeTab === "fx" && (
+        <HomeFxView
           t={t}
-          reverbEnabled={effectParams.reverbEnabled}
-          concertHallEnabled={effectParams.concertHallEnabled}
-          params={effectControls}
-          onToggleReverb={toggleReverb}
-          onToggleConcertHall={toggleConcertHall}
+          reverbEnabled={audioProcessor.spatialEffects.reverbEnabled}
+          reverbAmount={audioProcessor.spatialEffects.reverbAmount}
+          concertHallEnabled={audioProcessor.spatialEffects.concertHallEnabled}
+          concertHallAmount={audioProcessor.spatialEffects.concertHallAmount}
+          onToggleReverb={audioProcessor.setReverbEnabled}
+          onReverbAmountChange={audioProcessor.setReverbAmount}
+          onToggleConcertHall={audioProcessor.setConcertHallEnabled}
+          onConcertHallAmountChange={audioProcessor.setConcertHallAmount}
         />
       )}
 
@@ -1707,18 +1588,13 @@ export default function Home() {
         }}
         eqEnabled={audioProcessor.eqEnabled}
         epicenterEnabled={epicenterEnabled}
-        effectsEnabled={
-          effectParams.reverbEnabled || effectParams.concertHallEnabled
+        spatialEffectsEnabled={
+          audioProcessor.spatialEffects.reverbEnabled ||
+          audioProcessor.spatialEffects.concertHallEnabled
         }
         t={t}
       />
-      <div
-        className={
-          activeTab === "player"
-            ? "h-0"
-            : "h-[calc(5rem+var(--android-navigation-bar-offset,0px))]"
-        }
-      />
+      <div className={activeTab === "player" ? "h-0" : "bottom-nav-spacer"} />
     </div>
   );
 }

@@ -1,9 +1,6 @@
 import type { Track } from "@/hooks/useAudioQueue";
 import type { Playlist } from "@/hooks/usePlaylists";
-import type {
-  ReverbEffectConfig,
-  StreamingParams,
-} from "@/hooks/useIntegratedAudioProcessor";
+import type { StreamingParams } from "@/hooks/useIntegratedAudioProcessor";
 
 export type TranslateFn = (
   key: string,
@@ -16,7 +13,7 @@ export type HomeTabType =
   | "search"
   | "eq"
   | "dsp"
-  | "effects"
+  | "fx"
   | "settings";
 
 export type HomeLibraryView =
@@ -49,18 +46,6 @@ export interface HomePlaylistSelection {
 
 export interface DspParamConfig {
   key: keyof StreamingParams;
-  label: string;
-  min: number;
-  max: number;
-  step: number;
-  unit: string;
-  value: number;
-  onChange: (value: number) => void;
-  disabled?: boolean;
-}
-
-export interface EffectParamConfig {
-  key: keyof Pick<ReverbEffectConfig, "reverbAmount" | "concertHallAmount">;
   label: string;
   min: number;
   max: number;
