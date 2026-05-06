@@ -166,14 +166,14 @@
     "concertHall": "Concert Hall",
     "amount": "AMOUNT",
     "reverbDescription": "Light Schroeder-style reverb: short pre-delay, four comb filters, and two all-pass filters for depth without muddying the cabin.",
-    "concertHallDescription": "Larger hall inspired by concert rooms: moderate pre-delay, longer tail, high-frequency damping, and a gentle bass lift.",
+    "concertHallDescription": "Larger hall inspired by concert rooms: moderate pre-delay, stable tail, high-frequency damping, and limited wet mixing.",
     "description": "Concert Hall uses a real-time algorithmic hall. It is not a replacement for real IR convolution plus vehicle MIMO correction, but it keeps clarity with controlled dry/wet mixing.",
     "reverbSpecOne": "14 ms pre-delay",
     "reverbSpecTwo": "4 comb + 2 all-pass",
     "reverbSpecThree": "Controlled short tail",
     "concertSpecOne": "35 ms pre-delay",
     "concertSpecTwo": "Approx. 1.5–2 s RT60",
-    "concertSpecThree": "Damping + low shelf"
+    "concertSpecThree": "Damping + wet limiter"
   },
   "settings": {
     "title": "Settings",

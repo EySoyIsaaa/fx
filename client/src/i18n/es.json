@@ -166,14 +166,14 @@
     "concertHall": "Concert Hall",
     "amount": "AMOUNT",
     "reverbDescription": "Reverb ligera tipo Schroeder: pre-delay corto, cuatro comb filters y dos all-pass para dar profundidad sin enturbiar la cabina.",
-    "concertHallDescription": "Hall más amplio inspirado en salas de concierto: pre-delay moderado, cola más larga, damping de agudos y realce grave suave.",
+    "concertHallDescription": "Hall más amplio inspirado en salas de concierto: pre-delay moderado, cola estable, damping de agudos y mezcla húmeda limitada.",
     "description": "Concert Hall usa un hall algorítmico en tiempo real. No sustituye una convolución con IR real y corrección MIMO del vehículo, pero conserva claridad con mezcla seca/húmeda controlada.",
     "reverbSpecOne": "Pre-delay 14 ms",
     "reverbSpecTwo": "4 comb + 2 all-pass",
     "reverbSpecThree": "Cola corta controlada",
     "concertSpecOne": "Pre-delay 35 ms",
     "concertSpecTwo": "RT60 aprox. 1.5–2 s",
-    "concertSpecThree": "Damping + low shelf"
+    "concertSpecThree": "Damping + limitador wet"
   },
   "settings": {
     "title": "Ajustes",
