@@ -1,12 +1,37 @@
 import { useEffect, useState } from 'react';
 import { logger } from "@/lib/logger";
 
+const ANDROID_FAST_STREAMING_ENABLED = true;
+
+
+export interface AndroidAudioFileUrlResult {
+  url: string;
+  streamUrl?: string;
+  fileUrl?: string;
+  filePath?: string;
+  resolvedUrl?: string;
+  mimeType?: string;
+  cached?: boolean;
+  cacheHit?: boolean;
+  copyTimeMs?: number;
+  copiedBytes?: number;
+  playbackResolveTimeMs?: number;
+  resolveDurationMs: number;
+  fastPath?: boolean;
+  rejectReason?: string;
+  resolvedStableId?: string;
+  cacheKey?: string;
+}
+
 export interface AndroidMusicFile {
   id: string;
+  stableId?: string;
+  mediaStoreId?: string;
   name: string;
   title?: string;
   artist?: string;
   album?: string;
+  albumId?: number;
   contentUri: string;
   path?: string;
   size: number;
@@ -19,6 +44,7 @@ export interface AndroidMusicFile {
   isHiRes?: boolean;
   dateModified?: number;
   sourceVersionKey?: string;
+  sourceType?: 'media-store' | 'manual-uri';
 }
 
 export interface ScanProgress {
@@ -251,11 +277,12 @@ export function useAndroidMusicLibrary() {
    * Obtiene una URL de archivo accesible desde un content:// URI
    * Copia el archivo a caché para reproducción eficiente (especialmente para FLAC/WAV)
    */
-  const getAudioFileUrl = async (
+  const getAudioFileUrlResult = async (
     contentUri: string,
     trackId: string,
-    options?: { expectedSize?: number; sourceVersionKey?: string },
-  ): Promise<string | null> => {
+    options?: { expectedSize?: number; sourceVersionKey?: string; allowStreaming?: boolean },
+  ): Promise<AndroidAudioFileUrlResult | null> => {
+    const resolveStartMs = performance.now();
     try {
       const MusicScanner = getPlugin();
       
@@ -264,23 +291,46 @@ export function useAndroidMusicLibrary() {
         return null;
       }
 
-      logger.debug('🎵 Obteniendo URL de archivo para:', contentUri);
+      const allowStreaming = options?.allowStreaming ?? ANDROID_FAST_STREAMING_ENABLED;
+      logger.debug('🎵 Obteniendo URL de archivo para:', { contentUri, trackId, allowStreaming });
       const result = await MusicScanner.getAudioFileUrl({
         contentUri,
         trackId,
         expectedSize: options?.expectedSize,
         sourceVersionKey: options?.sourceVersionKey,
+        allowStreaming,
       });
+      const resolveDurationMs = performance.now() - resolveStartMs;
       
+      if (allowStreaming && result?.streamUrl) {
+        logger.debug('✅ URL de streaming obtenida', { streamUrl: result.streamUrl, cached: result.cached });
+        return {
+          ...result,
+          url: result.streamUrl,
+          streamUrl: result.streamUrl,
+          cacheHit: result.cacheHit ?? result.cached ?? false,
+          copyTimeMs: result.copyTimeMs ?? 0,
+          resolveDurationMs,
+        };
+      }
+
       if (result?.filePath) {
-        // Convertir la ruta del archivo a una URL que Capacitor puede servir
+        // Convertir sólo rutas de archivo locales. Los streamUrl HTTP se usan directo.
         const baseUrl = (window as any).Capacitor.convertFileSrc(result.filePath);
         const cacheBuster = typeof result?.resolvedUrl === 'string' && result.resolvedUrl.includes('?')
           ? result.resolvedUrl.substring(result.resolvedUrl.indexOf('?'))
           : '';
         const fileUrl = `${baseUrl}${cacheBuster}`;
         logger.debug('✅ URL de archivo obtenida', { fileUrl, cached: result.cached });
-        return fileUrl;
+        return {
+          ...result,
+          url: fileUrl,
+          fileUrl,
+          filePath: result.filePath,
+          cacheHit: result.cacheHit ?? result.cached ?? false,
+          copyTimeMs: result.copyTimeMs ?? 0,
+          resolveDurationMs,
+        };
       }
       
       return null;
@@ -290,9 +340,42 @@ export function useAndroidMusicLibrary() {
     }
   };
 
+  const getAudioFileUrl = async (
+    contentUri: string,
+    trackId: string,
+    options?: { expectedSize?: number; sourceVersionKey?: string; allowStreaming?: boolean },
+  ): Promise<string | null> => {
+    const result = await getAudioFileUrlResult(contentUri, trackId, options);
+    return result?.url ?? null;
+  };
+
   /**
    * Limpia la caché de archivos de audio
    */
+
+  const prepareAudioFileUrl = async (
+    contentUri: string,
+    trackId: string,
+    options?: { expectedSize?: number; sourceVersionKey?: string; allowStreaming?: boolean },
+  ): Promise<boolean> => {
+    try {
+      const MusicScanner = getPlugin();
+      if (!MusicScanner?.prepareAudioFileUrl) {
+        return false;
+      }
+      await MusicScanner.prepareAudioFileUrl({
+        contentUri,
+        trackId,
+        expectedSize: options?.expectedSize,
+        sourceVersionKey: options?.sourceVersionKey,
+      });
+      return true;
+    } catch (err) {
+      logger.warn('Error preparando URL de audio:', err);
+      return false;
+    }
+  };
+
   const clearAudioCache = async (): Promise<boolean> => {
     try {
       const MusicScanner = getPlugin();
@@ -335,6 +418,8 @@ export function useAndroidMusicLibrary() {
     requestPermissions,
     checkPermissions,
     getAudioFileUrl,
+    getAudioFileUrlResult,
+    prepareAudioFileUrl,
     getLibraryPage,
     getAlbumArt,
     clearAudioCache,
