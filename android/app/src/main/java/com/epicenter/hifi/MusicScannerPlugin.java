@@ -562,6 +562,8 @@ public class MusicScannerPlugin extends Plugin {
     String trackId = call.getString("trackId");
     String sourceVersionKey = call.getString("sourceVersionKey");
     Long expectedSize = call.getLong("expectedSize");
+    Boolean allowStreamingOpt = call.getBoolean("allowStreaming");
+    boolean allowStreaming = allowStreamingOpt == null ? true : allowStreamingOpt.booleanValue();
     
     if (contentUri == null || contentUri.isEmpty()) {
       call.reject("contentUri is required");
@@ -576,7 +578,7 @@ public class MusicScannerPlugin extends Plugin {
 
     try {
       long t0 = System.currentTimeMillis();
-      JSObject result = getAudioFileUrlInternal(contentUri, trackId, sourceVersionKey, expectedSize, true);
+      JSObject result = getAudioFileUrlInternal(contentUri, trackId, sourceVersionKey, expectedSize, allowStreaming);
       result.put("audioResolveTimeMs", System.currentTimeMillis() - t0);
       call.resolve(result);
     } catch (Exception e) {

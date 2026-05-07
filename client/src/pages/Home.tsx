@@ -95,6 +95,9 @@ const clampDspParam = (key: keyof StreamingParams, value: number): number => {
   }
 };
 
+const ANDROID_FAST_STREAMING_ENABLED = false;
+const ANDROID_PREFETCH_ENABLED = false;
+
 const clampDspParams = (params: StreamingParams): StreamingParams => ({
   sweepFreq: clampDspParam("sweepFreq", params.sweepFreq),
   width: clampDspParam("width", params.width),
@@ -126,6 +129,9 @@ export default function Home() {
   );
   const [visibleSongsCount, setVisibleSongsCount] = useState(250);
   const [showQueue, setShowQueue] = useState(false);
+  const [pendingTrack, setPendingTrack] = useState<Track | null>(null);
+  const [nowPlayingTrack, setNowPlayingTrack] = useState<Track | null>(null);
+  const [activeAudioSource, setActiveAudioSource] = useState("");
   const [globalSearchQuery, setGlobalSearchQuery] = useState("");
   const [dspParams, setDspParams] = useState<StreamingParams>({
     sweepFreq: 45,
@@ -319,21 +325,21 @@ export default function Home() {
 
   // Actualizar metadatos en Media Session cuando cambia el track
   useEffect(() => {
-    if (queue.currentTrack) {
+    if (nowPlayingTrack) {
       mediaSession.updateMetadata({
-        title: queue.currentTrack.title,
-        artist: queue.currentTrack.artist,
-        artwork: queue.currentTrack.coverUrl,
+        title: nowPlayingTrack.title,
+        artist: nowPlayingTrack.artist,
+        artwork: nowPlayingTrack.coverUrl,
       });
 
       mediaNotification.updateMetadata({
-        title: queue.currentTrack.title,
-        artist: queue.currentTrack.artist,
+        title: nowPlayingTrack.title,
+        artist: nowPlayingTrack.artist,
         album: "Epicenter Hi-Fi",
-        artwork: queue.currentTrack.coverUrl,
+        artwork: nowPlayingTrack.coverUrl,
       });
     }
-  }, [queue.currentTrack, mediaSession, mediaNotification]);
+  }, [nowPlayingTrack, mediaSession, mediaNotification]);
 
   // Actualizar estado de reproducción
   useEffect(() => {
@@ -342,14 +348,14 @@ export default function Home() {
     );
     mediaNotification.updatePlaybackState(audioProcessor.isPlaying);
 
-    if (audioProcessor.isPlaying && queue.currentTrack) {
+    if (audioProcessor.isPlaying && nowPlayingTrack) {
       mediaNotification.start();
     }
   }, [
     audioProcessor.isPlaying,
     mediaSession,
     mediaNotification,
-    queue.currentTrack,
+    nowPlayingTrack,
   ]);
 
   // Actualizar posición
@@ -425,8 +431,17 @@ export default function Home() {
           {
             expectedSize: stableLibraryTrack?.fileSize ?? track.fileSize,
             sourceVersionKey: stableLibraryTrack?.sourceVersionKey ?? track.sourceVersionKey,
+            allowStreaming: ANDROID_FAST_STREAMING_ENABLED,
           },
         );
+        console.info("[RESOLVE_RESULT]", {
+          requestId: trackLoadRequestRef.current,
+          source: fileUrl,
+          sourceType: track.sourceType,
+          cacheHit: fileUrl ? !fileUrl.startsWith("http://127.0.0.1") : false,
+          streamUrlUsed: !!fileUrl?.startsWith("http://127.0.0.1"),
+          filePathUsed: !!fileUrl && !fileUrl.startsWith("http://127.0.0.1"),
+        });
         console.info("[LOAD_DEBUG_SOURCE]", {
           requestedTrackId: track.id,
           requestedTrackSourceTrackId: track.sourceTrackId,
@@ -468,6 +483,7 @@ export default function Home() {
 
 
   useEffect(() => {
+    if (!ANDROID_PREFETCH_ENABLED) return;
     const nextTrack = queue.queue[queue.currentTrackIndex + 1];
     if (!nextTrack || !nextTrack.sourceUri || nextTrack.sourceType === "file") {
       return;
@@ -697,6 +713,17 @@ export default function Home() {
     const requestId = ++trackLoadRequestRef.current;
     clearPendingPlaybackTimers();
     currentTrackRef.current = requestedTrack.id;
+    setPendingTrack(requestedTrack);
+    console.info("[PLAYBACK_REQUEST]", {
+      requestId,
+      requestedTrackId: requestedTrack.id,
+      title: requestedTrack.title,
+      sourceUri: requestedTrack.sourceUri,
+      sourceType: requestedTrack.sourceType,
+      currentNowPlayingId: nowPlayingTrack?.id,
+      pendingTrackId: requestedTrack.id,
+      activeAudioSource,
+    });
 
     const loadTrack = async () => {
       const libraryTrack = queue.library.find(
@@ -722,6 +749,7 @@ export default function Home() {
           trackLoadRequestRef.current !== requestId ||
           currentTrackIdRef.current !== requestedTrack.id
         ) {
+          console.info("[PLAYBACK_CANCELLED]", { requestId, reason: "after_resolve" });
           return;
         }
 
@@ -747,8 +775,27 @@ export default function Home() {
           !loaded ||
           !isCurrentAfterLoad
         ) {
+          console.info("[PLAYBACK_CANCELLED]", {
+            requestId,
+            reason: loaded ? "stale_after_load" : "load_failed_or_cancelled",
+          });
           return;
         }
+
+        const activeSrc = audioProcessor.getActiveSource();
+        if (!activeSrc) {
+          console.info("[PLAYBACK_CANCELLED]", { requestId, reason: "missing_active_source" });
+          return;
+        }
+        setNowPlayingTrack(requestedTrack);
+        setPendingTrack(null);
+        setActiveAudioSource(activeSrc);
+        console.info("[NOW_PLAYING_COMMIT]", {
+          requestId,
+          nowPlayingTrackId: requestedTrack.id,
+          activeSrc,
+          title: requestedTrack.title,
+        });
 
         const playCallMs = performance.now();
         console.info("[PlaybackLatency] playRequest", {
@@ -784,7 +831,13 @@ export default function Home() {
           failedQueueTrackIdsRef.current.add(requestedTrack.id);
           audioProcessor.resetAfterError();
           currentTrackRef.current = null;
-          console.error("Error loading track:", error);
+          console.error("[PLAYBACK_ERROR]", {
+            requestId,
+            error,
+            activeSrc: audioProcessor.getActiveSource(),
+            requestedTrackId: requestedTrack.id,
+          });
+          setPendingTrack(null);
           const movedToNextTrack = playNextAvailableTrackAfterFailure(
             requestedTrack.id,
           );
@@ -811,6 +864,8 @@ export default function Home() {
     queue.queue,
     resolveTrackSource,
     playNextAvailableTrackAfterFailure,
+    activeAudioSource,
+    nowPlayingTrack,
     t,
   ]);
 
@@ -1457,8 +1512,10 @@ export default function Home() {
         onOpenFilePicker={handleFileSelect}
         queue={{
           queue: queue.queue,
-          currentTrack: queue.currentTrack,
-          currentTrackIndex: queue.currentTrackIndex,
+          currentTrack: nowPlayingTrack,
+          currentTrackIndex: nowPlayingTrack
+            ? queue.queue.findIndex((track) => track.id === nowPlayingTrack.id)
+            : queue.currentTrackIndex,
           playTrack: queue.playTrack,
           removeFromQueue: queue.removeFromQueue,
           reorderQueue: queue.reorderQueue,

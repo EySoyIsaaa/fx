@@ -35,6 +35,7 @@ export interface Track {
   isHiRes?: boolean;
   sourceUri?: string;
   sourceType?: 'file' | 'media-store' | 'manual-uri';
+  albumId?: number;
   albumArtUri?: string;
   mediaStoreId?: string;
   dateModified?: number;
@@ -165,6 +166,7 @@ export function useAudioQueue(): QueueController {
               isHiRes: metadata.isHiRes,
               sourceUri: metadata.sourceUri,
               sourceType: metadata.sourceType,
+              albumId: metadata.albumId,
               albumArtUri: metadata.albumArtUri,
               mediaStoreId: metadata.mediaStoreId,
               dateModified: metadata.dateModified,
@@ -194,6 +196,8 @@ export function useAudioQueue(): QueueController {
               if (metadata.coverBase64) {
                 coverUrl = metadata.coverBase64;
                 coverUrlsRef.current.set(metadata.id, coverUrl);
+              } else if (metadata.albumArtUri) {
+                coverUrl = metadata.albumArtUri;
               }
 
               tracks.push({
@@ -212,6 +216,7 @@ export function useAudioQueue(): QueueController {
                 isHiRes: metadata.isHiRes,
                 sourceUri: metadata.sourceUri,
                 sourceType: metadata.sourceType,
+                albumId: metadata.albumId,
                 albumArtUri: metadata.albumArtUri,
                 mediaStoreId: metadata.mediaStoreId,
                 dateModified: metadata.dateModified,
@@ -545,6 +550,7 @@ export function useAudioQueue(): QueueController {
         addedAt: Date.now(),
         sourceUri: trackInfo.contentUri,
         sourceType: 'media-store',
+        albumId: (trackInfo as any).albumId,
         mediaStoreId: trackInfo.mediaStoreId || trackInfo.id,
         dateModified: trackInfo.dateModified,
         sourceVersionKey: trackInfo.sourceVersionKey,
@@ -581,6 +587,7 @@ export function useAudioQueue(): QueueController {
         mediaStoreId: metadata.mediaStoreId,
         dateModified: metadata.dateModified,
         sourceVersionKey: metadata.sourceVersionKey,
+        albumId: metadata.albumId,
         unavailable: metadata.unavailable,
         lastValidatedAt: metadata.lastValidatedAt,
         bitDepth,
@@ -663,6 +670,7 @@ export function useAudioQueue(): QueueController {
               addedAt: Date.now(),
               sourceUri: unavailableTrack.sourceUri,
               sourceType: 'media-store',
+              albumId: unavailableTrack.albumId,
               albumArtUri: unavailableTrack.albumArtUri,
               mediaStoreId: unavailableTrack.mediaStoreId,
               dateModified: unavailableTrack.dateModified,
@@ -702,6 +710,8 @@ export function useAudioQueue(): QueueController {
             fileName: match.name || track.fileName,
             fileType: match.mimeType || track.fileType,
             sourceUri: match.contentUri || track.sourceUri,
+            albumId: (match as any).albumId ?? track.albumId,
+            albumArtUri: match.albumArtUri || track.albumArtUri,
             mediaStoreId: match.mediaStoreId || match.id,
             dateModified: match.dateModified,
             sourceVersionKey,
@@ -737,6 +747,7 @@ export function useAudioQueue(): QueueController {
               addedAt: Date.now(),
               sourceUri: nextTrack.sourceUri,
               sourceType: 'media-store',
+              albumId: nextTrack.albumId,
               albumArtUri: nextTrack.albumArtUri,
               mediaStoreId: nextTrack.mediaStoreId,
               dateModified: nextTrack.dateModified,

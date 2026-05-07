@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { logger } from "@/lib/logger";
 
+const ANDROID_FAST_STREAMING_ENABLED = false;
+
 export interface AndroidMusicFile {
   id: string;
   stableId?: string;
@@ -9,6 +11,7 @@ export interface AndroidMusicFile {
   title?: string;
   artist?: string;
   album?: string;
+  albumId?: number;
   contentUri: string;
   path?: string;
   size: number;
@@ -257,7 +260,7 @@ export function useAndroidMusicLibrary() {
   const getAudioFileUrl = async (
     contentUri: string,
     trackId: string,
-    options?: { expectedSize?: number; sourceVersionKey?: string },
+    options?: { expectedSize?: number; sourceVersionKey?: string; allowStreaming?: boolean },
   ): Promise<string | null> => {
     try {
       const MusicScanner = getPlugin();
@@ -273,9 +276,10 @@ export function useAndroidMusicLibrary() {
         trackId,
         expectedSize: options?.expectedSize,
         sourceVersionKey: options?.sourceVersionKey,
+        allowStreaming: options?.allowStreaming ?? ANDROID_FAST_STREAMING_ENABLED,
       });
       
-      if (result?.streamUrl) {
+      if ((options?.allowStreaming ?? ANDROID_FAST_STREAMING_ENABLED) && result?.streamUrl) {
         logger.debug('✅ URL de streaming obtenida', { streamUrl: result.streamUrl, cached: result.cached });
         return result.streamUrl;
       }
@@ -305,7 +309,7 @@ export function useAndroidMusicLibrary() {
   const prepareAudioFileUrl = async (
     contentUri: string,
     trackId: string,
-    options?: { expectedSize?: number; sourceVersionKey?: string },
+    options?: { expectedSize?: number; sourceVersionKey?: string; allowStreaming?: boolean },
   ): Promise<boolean> => {
     try {
       const MusicScanner = getPlugin();

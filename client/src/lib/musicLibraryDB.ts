@@ -20,35 +20,53 @@ const isAndroidNativeLibraryAvailable = (): boolean => {
 
 const getMusicScanner = () => (window as any).Capacitor?.Plugins?.MusicScanner;
 
-const mapNativeTrack = (track: any): StoredTrackMetadata => ({
-  id: String(track.stableId || track.id || ''),
-  title: track.title || track.name || 'Unknown',
-  artist: track.artist || 'Unknown Artist',
-  duration: typeof track.duration === 'number' ? track.duration : 0,
-  bitDepth: typeof track.bitDepth === 'number' ? track.bitDepth : undefined,
-  sampleRate: typeof track.sampleRate === 'number' ? track.sampleRate : undefined,
-  bitrate: typeof track.bitrate === 'number' ? track.bitrate : undefined,
-  isHiRes: typeof track.isHiRes === 'boolean' ? track.isHiRes : undefined,
-  coverBase64: undefined,
-  fileName: track.name || track.title || 'Unknown',
-  fileType: track.mimeType || 'audio/mpeg',
-  fileSize: typeof track.size === 'number' ? track.size : 0,
-  addedAt: Date.now(),
-  sourceUri: track.contentUri || track.sourceUri,
-  sourceType: track.sourceType === 'manual-uri' ? 'manual-uri' : 'media-store',
-  albumArtUri: track.albumArtUri,
-  mediaStoreId: String(track.mediaStoreId || ''),
-  dateModified: typeof track.dateModified === 'number' ? track.dateModified : undefined,
-  sourceVersionKey: track.sourceVersionKey || `${track.mediaStoreId || track.id}:${track.size || 0}:${track.dateModified || 0}`,
-  unavailable: false,
-  unavailableReason: '',
-  lastSeenAt: Date.now(),
-  missingSince: 0,
-  missingCount: 0,
-  scanCompleteness: 'complete',
-  lastValidatedAt: Date.now(),
-  fingerprint: `${track.id || ''}_${track.size || 0}_${track.dateModified || 0}`,
-});
+const mapNativeTrack = (track: any): StoredTrackMetadata => {
+  const albumId = typeof track.albumId === 'number' ? track.albumId : undefined;
+  const reconstructedAlbumArtUri = !track.albumArtUri && albumId && albumId > 0
+    ? `content://media/external/audio/albumart/${albumId}`
+    : undefined;
+  const albumArtUri = track.albumArtUri || reconstructedAlbumArtUri;
+
+  console.info('[ARTWORK_MAP]', {
+    id: String(track.stableId || track.id || ''),
+    title: track.title || track.name || 'Unknown',
+    albumId,
+    albumArtUri,
+    preservedAlbumArtUri: track.albumArtUri,
+    reconstructedAlbumArtUri,
+  });
+
+  return {
+    id: String(track.stableId || track.id || ''),
+    title: track.title || track.name || 'Unknown',
+    artist: track.artist || 'Unknown Artist',
+    duration: typeof track.duration === 'number' ? track.duration : 0,
+    bitDepth: typeof track.bitDepth === 'number' ? track.bitDepth : undefined,
+    sampleRate: typeof track.sampleRate === 'number' ? track.sampleRate : undefined,
+    bitrate: typeof track.bitrate === 'number' ? track.bitrate : undefined,
+    isHiRes: typeof track.isHiRes === 'boolean' ? track.isHiRes : undefined,
+    coverBase64: undefined,
+    fileName: track.name || track.title || 'Unknown',
+    fileType: track.mimeType || 'audio/mpeg',
+    fileSize: typeof track.size === 'number' ? track.size : 0,
+    addedAt: Date.now(),
+    sourceUri: track.contentUri || track.sourceUri,
+    sourceType: track.sourceType === 'manual-uri' ? 'manual-uri' : 'media-store',
+    albumId,
+    albumArtUri,
+    mediaStoreId: String(track.mediaStoreId || ''),
+    dateModified: typeof track.dateModified === 'number' ? track.dateModified : undefined,
+    sourceVersionKey: track.sourceVersionKey || `${track.mediaStoreId || track.id}:${track.size || 0}:${track.dateModified || 0}`,
+    unavailable: false,
+    unavailableReason: '',
+    lastSeenAt: Date.now(),
+    missingSince: 0,
+    missingCount: 0,
+    scanCompleteness: 'complete',
+    lastValidatedAt: Date.now(),
+    fingerprint: `${track.id || ''}_${track.size || 0}_${track.dateModified || 0}`,
+  };
+};
 
 export interface StoredTrackMetadata {
   id: string;
@@ -66,6 +84,7 @@ export interface StoredTrackMetadata {
   addedAt: number;
   sourceUri?: string;
   sourceType?: 'file' | 'media-store' | 'manual-uri';
+  albumId?: number;
   albumArtUri?: string;
   mediaStoreId?: string;
   dateModified?: number;
