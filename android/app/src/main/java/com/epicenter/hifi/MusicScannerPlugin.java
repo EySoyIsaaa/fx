@@ -28,6 +28,15 @@ import java.io.FileOutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -38,6 +47,9 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -57,6 +69,12 @@ public class MusicScannerPlugin extends Plugin {
   private volatile JSArray cachedLibrary = null;
   private static final String ROOM_MIGRATED_KEY = "room_migrated_v1";
   private static final String LAST_FULL_SCAN_COUNT_KEY = "last_full_scan_count_v1";
+  private static final int AUDIO_BUFFER_SIZE = 512 * 1024;
+
+  private final ExecutorService audioExecutor = Executors.newSingleThreadExecutor();
+  private volatile ServerSocket audioServerSocket;
+  private volatile int audioServerPort = -1;
+  private final String audioSessionToken = UUID.randomUUID().toString();
 
   private static class AudioFormatInfo {
     Integer bitDepth;
@@ -367,6 +385,7 @@ public class MusicScannerPlugin extends Plugin {
           if (track != null) {
             TrackEntity e = toEntity(track, now);
             e.sourceType = "manual-uri";
+            e.mediaStoreId = null;
             e.scanCompleteness = "complete";
             dao().upsert(e);
             changed.incrementAndGet();
@@ -476,6 +495,31 @@ public class MusicScannerPlugin extends Plugin {
     }
   }
 
+  @Override
+  protected void handleOnDestroy() {
+    shutdownAudioServer();
+    super.handleOnDestroy();
+  }
+
+  private void shutdownAudioServer() {
+    try {
+      if (audioServerSocket != null && !audioServerSocket.isClosed()) {
+        audioServerSocket.close();
+      }
+    } catch (Exception e) {
+      android.util.Log.w("MusicScanner", "audioServerCloseFailed " + e.getMessage());
+    } finally {
+      audioServerSocket = null;
+      audioServerPort = -1;
+    }
+
+    try {
+      audioExecutor.shutdownNow();
+    } catch (Exception e) {
+      android.util.Log.w("MusicScanner", "audioExecutorShutdownFailed " + e.getMessage());
+    }
+  }
+
   @PluginMethod
   public void getAudioFileUrlById(PluginCall call) {
     String id = call.getString("id");
@@ -499,7 +543,8 @@ public class MusicScannerPlugin extends Plugin {
         contentUri,
         id,
         track.optString("sourceVersionKey", id),
-        track.has("size") ? track.optLong("size") : null
+        track.has("size") ? track.optLong("size") : null,
+        true
       );
       call.resolve(result);
     } catch (Exception e) {
@@ -531,7 +576,7 @@ public class MusicScannerPlugin extends Plugin {
 
     try {
       long t0 = System.currentTimeMillis();
-      JSObject result = getAudioFileUrlInternal(contentUri, trackId, sourceVersionKey, expectedSize);
+      JSObject result = getAudioFileUrlInternal(contentUri, trackId, sourceVersionKey, expectedSize, true);
       result.put("audioResolveTimeMs", System.currentTimeMillis() - t0);
       call.resolve(result);
     } catch (Exception e) {
@@ -545,7 +590,8 @@ public class MusicScannerPlugin extends Plugin {
     String contentUri,
     String trackId,
     String sourceVersionKey,
-    Long expectedSize
+    Long expectedSize,
+    boolean allowStreaming
   ) throws Exception {
       Uri uri = Uri.parse(contentUri);
       ContentResolver resolver = getContext().getContentResolver();
@@ -574,24 +620,44 @@ public class MusicScannerPlugin extends Plugin {
       TrackEntity linked = dao().getByStableId(trackId);
       if (linked == null) linked = dao().getByMediaStoreId(trackId);
       if (linked == null) linked = dao().findBySourceUri(contentUri);
-      if (linked != null && linked.cachedFilePath != null && !linked.cachedFilePath.isEmpty()) {
+      boolean linkedMatchesRequested =
+        linked != null &&
+        contentUri != null &&
+        linked.sourceUri != null &&
+        linked.sourceUri.equals(contentUri);
+      if (linked != null && !linkedMatchesRequested && linked.cachedFilePath != null && !linked.cachedFilePath.isEmpty()) {
+        android.util.Log.w("MusicScanner", "linkedCacheRejected sourceUri mismatch requested=" + contentUri + " linked=" + linked.sourceUri + " linkedStableId=" + linked.stableId);
+      }
+      if (linkedMatchesRequested && linked.cachedFilePath != null && !linked.cachedFilePath.isEmpty()) {
         File linkedCache = new File(linked.cachedFilePath);
-        if (linkedCache.exists() && linkedCache.length() > 0 && (expectedSize == null || expectedSize <= 0 || linkedCache.length() == expectedSize)) {
+        String rejectReason = null;
+        if (!linkedCache.exists()) rejectReason = "missing";
+        else if (linkedCache.length() <= 0) rejectReason = "empty";
+        else if (expectedSize != null && expectedSize > 0 && linkedCache.length() != expectedSize) rejectReason = "size_mismatch";
+        if (rejectReason == null) {
           JSObject fast = new JSObject();
           fast.put("filePath", linkedCache.getAbsolutePath());
-          fast.put("resolvedUrl", linkedCache.getAbsolutePath() + "?cb=" + System.currentTimeMillis());
+          fast.put("resolvedUrl", linkedCache.getAbsolutePath() + "?v=" + (linked.sourceVersionKey != null && !linked.sourceVersionKey.isEmpty() ? sha1(linked.sourceVersionKey) : sha1(linkedCache.getAbsolutePath() + ":" + linkedCache.length())));
           fast.put("mimeType", mimeType);
           fast.put("cached", true);
           fast.put("cacheKey", "linked-fast-path");
           fast.put("resolvedStableId", linked.stableId);
-          android.util.Log.i("MusicScanner", "playbackResolvedUrl=" + linkedCache.getAbsolutePath() + " playbackResolveTimeMs=" + (System.currentTimeMillis() - resolveStart));
+          fast.put("playbackResolveTimeMs", System.currentTimeMillis() - resolveStart);
+          fast.put("cacheHit", true);
+          fast.put("fastPath", true);
+          fast.put("copyTimeMs", 0);
+          fast.put("copiedBytes", 0);
+          fast.put("bufferSize", AUDIO_BUFFER_SIZE);
+          fast.put("rejectReason", "");
+          android.util.Log.i("MusicScanner", "playbackResolvedUrl=" + linkedCache.getAbsolutePath() + " playbackResolveTimeMs=" + (System.currentTimeMillis() - resolveStart) + " cacheHit=true copyTimeMs=0 copiedBytes=0 bufferSize=" + AUDIO_BUFFER_SIZE + " fastPath=true rejectReason=");
           return fast;
         }
+        android.util.Log.w("MusicScanner", "linkedCacheRejected rejectReason=" + rejectReason + " requested=" + contentUri + " linked=" + linked.sourceUri + " linkedStableId=" + linked.stableId);
       }
       if (linked != null && (sourceVersionKey == null || sourceVersionKey.isEmpty())) {
         sourceVersionKey = linked.sourceVersionKey;
       }
-      String stableForCache = linked != null ? linked.stableId : sha1(trackId + "|" + contentUri);
+      String stableForCache = linkedMatchesRequested && linked != null ? linked.stableId : sha1(trackId + "|" + contentUri);
       String cacheIdentity = stableForCache + "|" + contentUri + "|" + (sourceVersionKey != null ? sourceVersionKey : trackId);
       String cacheHash = sha1(cacheIdentity);
       android.util.Log.i("MusicScanner", "playbackTrackId=" + trackId + " stableId=" + stableForCache + " sourceUri=" + contentUri + " sourceVersionKey=" + sourceVersionKey + " cacheKey=" + cacheHash + " linkedCachedFilePath=" + (linked != null ? linked.cachedFilePath : ""));
@@ -603,7 +669,7 @@ public class MusicScannerPlugin extends Plugin {
       
       // Si el archivo ya existe en caché, devolverlo directamente
       if (outputFile.exists()) {
-        if (linked != null && linked.cachedFilePath != null && !linked.cachedFilePath.isEmpty() && !outputFile.getAbsolutePath().equals(linked.cachedFilePath)) {
+        if (linkedMatchesRequested && linked != null && linked.cachedFilePath != null && !linked.cachedFilePath.isEmpty() && !outputFile.getAbsolutePath().equals(linked.cachedFilePath)) {
           android.util.Log.w("MusicScanner", "audioCacheMismatch stableId=" + linked.stableId + " expected=" + outputFile.getAbsolutePath() + " linked=" + linked.cachedFilePath);
           outputFile.delete();
         }
@@ -613,17 +679,45 @@ public class MusicScannerPlugin extends Plugin {
         android.util.Log.d("MusicScanner", "✅ Archivo ya en caché: " + outputFile.getAbsolutePath());
         JSObject result = new JSObject();
         result.put("filePath", outputFile.getAbsolutePath());
-        result.put("resolvedUrl", outputFile.getAbsolutePath() + "?cb=" + System.currentTimeMillis());
+        result.put("resolvedUrl", outputFile.getAbsolutePath() + "?v=" + cacheHash);
         result.put("mimeType", mimeType);
         result.put("cached", true);
         result.put("cacheKey", cacheHash);
         result.put("resolvedStableId", stableForCache);
-        if (linked != null) {
+        if (linkedMatchesRequested && linked != null) {
           dao().updateCachePaths(linked.stableId, outputFile.getAbsolutePath(), contentUri, System.currentTimeMillis() / 1000L);
         }
-        android.util.Log.i("MusicScanner", "playbackResolvedUrl=" + outputFile.getAbsolutePath() + " playbackResolveTimeMs=" + (System.currentTimeMillis() - resolveStart));
+        result.put("playbackResolveTimeMs", System.currentTimeMillis() - resolveStart);
+        result.put("cacheHit", true);
+        result.put("fastPath", true);
+        result.put("copyTimeMs", 0);
+        result.put("copiedBytes", 0);
+        result.put("bufferSize", AUDIO_BUFFER_SIZE);
+        result.put("rejectReason", "");
+        android.util.Log.i("MusicScanner", "playbackResolvedUrl=" + outputFile.getAbsolutePath() + " playbackResolveTimeMs=" + (System.currentTimeMillis() - resolveStart) + " cacheHit=true copyTimeMs=0 copiedBytes=0 bufferSize=" + AUDIO_BUFFER_SIZE + " fastPath=true rejectReason=");
         return result;
         }
+      }
+
+      if (allowStreaming && linkedMatchesRequested && linked != null) {
+        ensureAudioServerStarted();
+        String streamUrl = "http://127.0.0.1:" + audioServerPort + "/audio/" + URLEncoder.encode(linked.stableId, "UTF-8") + "?token=" + URLEncoder.encode(audioSessionToken, "UTF-8") + "&sourceUri=" + URLEncoder.encode(contentUri, "UTF-8") + "&v=" + cacheHash;
+        JSObject stream = new JSObject();
+        stream.put("streamUrl", streamUrl);
+        stream.put("resolvedUrl", streamUrl);
+        stream.put("mimeType", mimeType);
+        stream.put("cached", false);
+        stream.put("cacheKey", cacheHash);
+        stream.put("resolvedStableId", linked.stableId);
+        stream.put("playbackResolveTimeMs", System.currentTimeMillis() - resolveStart);
+        stream.put("cacheHit", false);
+        stream.put("fastPath", true);
+        stream.put("copyTimeMs", 0);
+        stream.put("copiedBytes", 0);
+        stream.put("bufferSize", AUDIO_BUFFER_SIZE);
+        stream.put("rejectReason", "streaming_no_cache");
+        android.util.Log.i("MusicScanner", "playbackResolvedUrl=" + streamUrl + " playbackResolveTimeMs=" + (System.currentTimeMillis() - resolveStart) + " cacheHit=false copyTimeMs=0 copiedBytes=0 bufferSize=" + AUDIO_BUFFER_SIZE + " fastPath=true rejectReason=streaming_no_cache");
+        return stream;
       }
       
       // Copiar archivo desde content:// a caché (1 retry simple)
@@ -634,7 +728,7 @@ public class MusicScannerPlugin extends Plugin {
         inputStream = resolver.openInputStream(uri);
       }
       if (inputStream == null) {
-        if (linked != null) dao().markPlaybackError(linked.stableId, true, true, "open_input_stream_failed", System.currentTimeMillis() / 1000L);
+        if (linkedMatchesRequested && linked != null) dao().markPlaybackError(linked.stableId, true, true, "open_input_stream_failed", System.currentTimeMillis() / 1000L);
         android.util.Log.e("MusicScanner", "playbackErrorReason=open_input_stream_failed stableId=" + stableForCache);
         throw new Exception("Could not open audio file");
       }
@@ -643,18 +737,22 @@ public class MusicScannerPlugin extends Plugin {
         tempFile.delete();
       }
 
-      OutputStream outputStream = new FileOutputStream(tempFile);
-      byte[] buffer = new byte[8192];
+      long copyStart = System.currentTimeMillis();
+      InputStream rawInput = inputStream;
+      InputStream bufferedInput = new BufferedInputStream(rawInput, AUDIO_BUFFER_SIZE);
+      OutputStream outputStream = new BufferedOutputStream(new FileOutputStream(tempFile), AUDIO_BUFFER_SIZE);
+      byte[] buffer = new byte[AUDIO_BUFFER_SIZE];
       int bytesRead;
       long totalBytes = 0;
       
-      while ((bytesRead = inputStream.read(buffer)) != -1) {
+      while ((bytesRead = bufferedInput.read(buffer)) != -1) {
         outputStream.write(buffer, 0, bytesRead);
         totalBytes += bytesRead;
       }
       
-      inputStream.close();
+      bufferedInput.close();
       outputStream.close();
+      long copyTimeMs = System.currentTimeMillis() - copyStart;
 
       if (totalBytes <= 0) {
         tempFile.delete();
@@ -679,18 +777,304 @@ public class MusicScannerPlugin extends Plugin {
 
       JSObject result = new JSObject();
       result.put("filePath", outputFile.getAbsolutePath());
-      result.put("resolvedUrl", outputFile.getAbsolutePath() + "?cb=" + System.currentTimeMillis());
+      result.put("resolvedUrl", outputFile.getAbsolutePath() + "?v=" + cacheHash);
       result.put("mimeType", mimeType);
       result.put("size", totalBytes);
       result.put("cached", false);
       result.put("cacheKey", cacheHash);
       result.put("resolvedStableId", stableForCache);
-      if (linked != null) {
+      if (linkedMatchesRequested && linked != null) {
         dao().updateCachePaths(linked.stableId, outputFile.getAbsolutePath(), contentUri, System.currentTimeMillis() / 1000L);
       }
-      if (linked != null) dao().markPlaybackError(linked.stableId, false, false, null, System.currentTimeMillis() / 1000L);
-      android.util.Log.i("MusicScanner", "playbackResolvedUrl=" + outputFile.getAbsolutePath() + " playbackResolveTimeMs=" + (System.currentTimeMillis() - resolveStart));
+      if (linkedMatchesRequested && linked != null) dao().markPlaybackError(linked.stableId, false, false, null, System.currentTimeMillis() / 1000L);
+      result.put("playbackResolveTimeMs", System.currentTimeMillis() - resolveStart);
+      result.put("cacheHit", false);
+      result.put("fastPath", false);
+      result.put("copyTimeMs", copyTimeMs);
+      result.put("copiedBytes", totalBytes);
+      result.put("bufferSize", AUDIO_BUFFER_SIZE);
+      result.put("rejectReason", "copied_to_cache");
+      android.util.Log.i("MusicScanner", "playbackResolvedUrl=" + outputFile.getAbsolutePath() + " playbackResolveTimeMs=" + (System.currentTimeMillis() - resolveStart) + " cacheHit=false copyTimeMs=" + copyTimeMs + " copiedBytes=" + totalBytes + " bufferSize=" + AUDIO_BUFFER_SIZE + " fastPath=false rejectReason=copied_to_cache");
       return result;
+  }
+
+
+  @PluginMethod
+  public void prepareAudioFileUrl(PluginCall call) {
+    String contentUri = call.getString("contentUri");
+    String trackId = call.getString("trackId");
+    String sourceVersionKey = call.getString("sourceVersionKey");
+    Long expectedSize = call.getLong("expectedSize");
+
+    if (contentUri == null || contentUri.isEmpty()) {
+      call.reject("contentUri is required");
+      return;
+    }
+    if (trackId == null || trackId.isEmpty()) {
+      call.reject("trackId is required");
+      return;
+    }
+
+    JSObject queued = new JSObject();
+    queued.put("queued", true);
+    call.resolve(queued);
+    audioExecutor.execute(() -> {
+      try {
+        long t0 = System.currentTimeMillis();
+        JSObject result = getAudioFileUrlInternal(contentUri, trackId, sourceVersionKey, expectedSize, false);
+        String filePath = result.getString("filePath");
+        if (filePath != null && !filePath.isEmpty()) {
+          getContext().getSharedPreferences(LIBRARY_PREFS, android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putString("next_cached_file_path", filePath)
+            .apply();
+        }
+        android.util.Log.i("MusicScanner", "prepareAudioFileUrlDone trackId=" + trackId + " elapsedMs=" + (System.currentTimeMillis() - t0) + " filePath=" + filePath);
+      } catch (Exception e) {
+        android.util.Log.w("MusicScanner", "prepareAudioFileUrlFailed trackId=" + trackId + " reason=" + e.getMessage());
+      }
+    });
+  }
+
+  private synchronized void ensureAudioServerStarted() throws Exception {
+    if (audioServerSocket != null && !audioServerSocket.isClosed() && audioServerPort > 0) return;
+    audioServerSocket = new ServerSocket(0, 16, java.net.InetAddress.getByName("127.0.0.1"));
+    audioServerPort = audioServerSocket.getLocalPort();
+    Thread serverThread = new Thread(() -> {
+      while (audioServerSocket != null && !audioServerSocket.isClosed()) {
+        try {
+          Socket socket = audioServerSocket.accept();
+          new Thread(() -> handleAudioHttpClient(socket), "EpicenterAudioClient").start();
+        } catch (Exception e) {
+          if (audioServerSocket != null && !audioServerSocket.isClosed()) {
+            android.util.Log.w("MusicScanner", "audioServerAcceptFailed " + e.getMessage());
+          }
+        }
+      }
+    }, "EpicenterAudioServer");
+    serverThread.setDaemon(true);
+    serverThread.start();
+    android.util.Log.i("MusicScanner", "audioServerStarted port=" + audioServerPort);
+  }
+
+  private void handleAudioHttpClient(Socket socket) {
+    try {
+      socket.setSoTimeout(30000);
+      BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+      String requestLine = reader.readLine();
+      if (requestLine == null) {
+        writeHttpError(socket, 400, "Bad Request");
+        return;
+      }
+      if (requestLine.startsWith("OPTIONS ")) {
+        writeHttpOptions(socket);
+        return;
+      }
+      if (!requestLine.startsWith("GET ")) {
+        writeHttpError(socket, 405, "Method Not Allowed");
+        return;
+      }
+      String[] requestParts = requestLine.split(" ");
+      if (requestParts.length < 2) {
+        writeHttpError(socket, 400, "Bad Request");
+        return;
+      }
+      String target = requestParts[1];
+      String rangeHeader = null;
+      String line;
+      while ((line = reader.readLine()) != null && line.length() > 0) {
+        int colon = line.indexOf(':');
+        if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("Range")) {
+          rangeHeader = line.substring(colon + 1).trim();
+        }
+      }
+
+      int q = target.indexOf('?');
+      String path = q >= 0 ? target.substring(0, q) : target;
+      Map<String, String> query = parseQuery(q >= 0 ? target.substring(q + 1) : "");
+      if (!audioSessionToken.equals(query.get("token"))) {
+        writeHttpError(socket, 403, "Forbidden");
+        return;
+      }
+      if (!path.startsWith("/audio/")) {
+        writeHttpError(socket, 404, "Not Found");
+        return;
+      }
+      String stableId = URLDecoder.decode(path.substring("/audio/".length()), "UTF-8");
+      String requestedSourceUri = query.get("sourceUri");
+      TrackEntity entity = dao().getByStableId(stableId);
+      if (entity == null || entity.sourceUri == null || requestedSourceUri == null || !entity.sourceUri.equals(requestedSourceUri)) {
+        writeHttpError(socket, 404, "Not Found");
+        return;
+      }
+
+      Uri uri = Uri.parse(entity.sourceUri);
+      ContentResolver resolver = getContext().getContentResolver();
+      String mimeType = resolver.getType(uri);
+      if (mimeType == null || mimeType.isEmpty()) mimeType = entity.mimeType != null ? entity.mimeType : "audio/mpeg";
+      long size = entity.size > 0 ? entity.size : -1;
+      HttpRange range;
+      try {
+        range = parseRange(rangeHeader, size);
+      } catch (IllegalArgumentException rangeError) {
+        writeRangeNotSatisfiable(socket, size);
+        return;
+      }
+      long contentLength = range.contentLength;
+
+      InputStream input = resolver.openInputStream(uri);
+      if (input == null) {
+        writeHttpError(socket, 404, "Not Found");
+        return;
+      }
+      input = new BufferedInputStream(input, AUDIO_BUFFER_SIZE);
+      skipFully(input, range.start);
+      PrintWriter writer = new PrintWriter(socket.getOutputStream(), false);
+      writer.print("HTTP/1.1 " + (range.partial ? "206 Partial Content" : "200 OK") + "\r\n");
+      writer.print("Content-Type: " + mimeType + "\r\n");
+      writeCorsHeaders(writer);
+      writer.print("Accept-Ranges: bytes\r\n");
+      if (contentLength >= 0) writer.print("Content-Length: " + contentLength + "\r\n");
+      if (range.partial && size > 0) writer.print("Content-Range: bytes " + range.start + "-" + range.end + "/" + size + "\r\n");
+      writer.print("Connection: close\r\n\r\n");
+      writer.flush();
+
+      byte[] buffer = new byte[AUDIO_BUFFER_SIZE];
+      long remaining = contentLength;
+      int read;
+      OutputStream out = socket.getOutputStream();
+      while ((contentLength < 0 || remaining > 0) && (read = input.read(buffer, 0, contentLength < 0 ? buffer.length : (int)Math.min(buffer.length, remaining))) != -1) {
+        out.write(buffer, 0, read);
+        if (contentLength >= 0) remaining -= read;
+      }
+      out.flush();
+      input.close();
+    } catch (Exception e) {
+      android.util.Log.w("MusicScanner", "audioServerClientFailed " + e.getMessage());
+    } finally {
+      try { socket.close(); } catch (Exception ignored) {}
+    }
+  }
+
+  private static class HttpRange {
+    long start;
+    long end;
+    long contentLength;
+    boolean partial;
+  }
+
+  private HttpRange parseRange(String rangeHeader, long size) {
+    HttpRange range = new HttpRange();
+    range.start = 0;
+    range.end = size > 0 ? size - 1 : -1;
+    range.contentLength = size > 0 ? size : -1;
+    range.partial = false;
+
+    if (rangeHeader == null || rangeHeader.trim().isEmpty()) {
+      return range;
+    }
+
+    String trimmed = rangeHeader.trim();
+    if (!trimmed.startsWith("bytes=") || trimmed.indexOf(',') >= 0 || size <= 0) {
+      throw new IllegalArgumentException("invalid_range");
+    }
+
+    String spec = trimmed.substring("bytes=".length()).trim();
+    int dash = spec.indexOf('-');
+    if (dash < 0 || spec.indexOf('-', dash + 1) >= 0) {
+      throw new IllegalArgumentException("invalid_range");
+    }
+
+    String startPart = spec.substring(0, dash).trim();
+    String endPart = spec.substring(dash + 1).trim();
+    if (startPart.isEmpty() && endPart.isEmpty()) {
+      throw new IllegalArgumentException("invalid_range");
+    }
+
+    try {
+      if (startPart.isEmpty()) {
+        long suffixLength = Long.parseLong(endPart);
+        if (suffixLength <= 0) throw new IllegalArgumentException("invalid_range");
+        range.start = suffixLength >= size ? 0 : size - suffixLength;
+        range.end = size - 1;
+      } else {
+        range.start = Long.parseLong(startPart);
+        if (range.start < 0 || range.start >= size) throw new IllegalArgumentException("invalid_range");
+        range.end = endPart.isEmpty() ? size - 1 : Long.parseLong(endPart);
+        if (range.end < range.start) throw new IllegalArgumentException("invalid_range");
+        if (range.end >= size) range.end = size - 1;
+      }
+    } catch (NumberFormatException e) {
+      throw new IllegalArgumentException("invalid_range", e);
+    }
+
+    range.contentLength = range.end - range.start + 1;
+    if (range.contentLength <= 0) {
+      throw new IllegalArgumentException("invalid_range");
+    }
+    range.partial = true;
+    return range;
+  }
+
+  private Map<String, String> parseQuery(String query) throws Exception {
+    Map<String, String> params = new HashMap<>();
+    if (query == null || query.isEmpty()) return params;
+    for (String part : query.split("&")) {
+      int eq = part.indexOf('=');
+      String key = eq >= 0 ? part.substring(0, eq) : part;
+      String value = eq >= 0 ? part.substring(eq + 1) : "";
+      params.put(URLDecoder.decode(key, "UTF-8"), URLDecoder.decode(value, "UTF-8"));
+    }
+    return params;
+  }
+
+  private void skipFully(InputStream input, long bytes) throws Exception {
+    long remaining = bytes;
+    while (remaining > 0) {
+      long skipped = input.skip(remaining);
+      if (skipped <= 0) {
+        if (input.read() == -1) throw new Exception("Unable to skip range");
+        skipped = 1;
+      }
+      remaining -= skipped;
+    }
+  }
+
+  private void writeRangeNotSatisfiable(Socket socket, long size) throws Exception {
+    PrintWriter writer = new PrintWriter(socket.getOutputStream(), false);
+    writer.print("HTTP/1.1 416 Range Not Satisfiable\r\n");
+    writeCorsHeaders(writer);
+    writer.print("Accept-Ranges: bytes\r\n");
+    writer.print("Content-Range: bytes */" + (size > 0 ? String.valueOf(size) : "*") + "\r\n");
+    writer.print("Content-Length: 0\r\n");
+    writer.print("Connection: close\r\n\r\n");
+    writer.flush();
+  }
+
+  private void writeHttpOptions(Socket socket) throws Exception {
+    PrintWriter writer = new PrintWriter(socket.getOutputStream(), false);
+    writer.print("HTTP/1.1 204 No Content\r\n");
+    writeCorsHeaders(writer);
+    writer.print("Content-Length: 0\r\n");
+    writer.print("Connection: close\r\n\r\n");
+    writer.flush();
+  }
+
+  private void writeCorsHeaders(PrintWriter writer) {
+    writer.print("Access-Control-Allow-Origin: *\r\n");
+    writer.print("Access-Control-Allow-Methods: GET, OPTIONS\r\n");
+    writer.print("Access-Control-Allow-Headers: Range, Origin, Accept, Content-Type\r\n");
+    writer.print("Access-Control-Expose-Headers: Accept-Ranges, Content-Length, Content-Range, Content-Type\r\n");
+  }
+
+  private void writeHttpError(Socket socket, int code, String message) throws Exception {
+    PrintWriter writer = new PrintWriter(socket.getOutputStream(), false);
+    writer.print("HTTP/1.1 " + code + " " + message + "\r\n");
+    writeCorsHeaders(writer);
+    writer.print("Content-Type: text/plain\r\n");
+    writer.print("Content-Length: 0\r\n");
+    writer.print("Connection: close\r\n\r\n");
+    writer.flush();
   }
 
   private String sha1(String value) {
@@ -855,11 +1239,12 @@ public class MusicScannerPlugin extends Plugin {
 
   private JSObject toJs(TrackEntity e) {
     JSObject o = new JSObject();
-    o.put("id", e.mediaStoreId != null ? e.mediaStoreId : e.stableId);
+    o.put("id", e.stableId);
     o.put("stableId", e.stableId);
     o.put("mediaStoreId", e.mediaStoreId);
     o.put("contentUri", e.sourceUri);
     o.put("sourceUri", e.sourceUri);
+    o.put("sourceType", e.sourceType);
     o.put("name", e.title);
     o.put("title", e.title);
     o.put("artist", e.artist);
