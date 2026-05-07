@@ -24,6 +24,7 @@ export interface Track {
   isEphemeral?: boolean; // Disponible solo en esta sesión (fallback si falla IndexedDB)
   fileName?: string;
   fileType?: string;
+  fileSize?: number;
   title: string;
   artist: string;
   duration: number;
@@ -33,7 +34,7 @@ export interface Track {
   bitrate?: number;
   isHiRes?: boolean;
   sourceUri?: string;
-  sourceType?: 'file' | 'media-store';
+  sourceType?: 'file' | 'media-store' | 'manual-uri';
   albumArtUri?: string;
   mediaStoreId?: string;
   dateModified?: number;
@@ -153,6 +154,7 @@ export function useAudioQueue(): QueueController {
               file,
               fileName: metadata.fileName,
               fileType: metadata.fileType,
+              fileSize: metadata.fileSize,
               title: metadata.title,
               artist: metadata.artist,
               duration: metadata.duration,
@@ -199,6 +201,7 @@ export function useAudioQueue(): QueueController {
                 file,
                 fileName: metadata.fileName,
                 fileType: metadata.fileType,
+                fileSize: metadata.fileSize,
                 title: metadata.title,
                 artist: metadata.artist,
                 duration: metadata.duration,
@@ -498,7 +501,7 @@ export function useAudioQueue(): QueueController {
         artist: trackInfo.artist,
         title: trackInfo.title,
         sourceType: 'media-store',
-        mediaStoreId: trackInfo.id,
+        mediaStoreId: trackInfo.mediaStoreId || trackInfo.id,
       });
 
       if (existingFingerprints.has(fingerprint)) {
@@ -506,7 +509,7 @@ export function useAudioQueue(): QueueController {
         continue;
       }
 
-      const id = `media-${trackInfo.id}`;
+      const id = `media-${trackInfo.stableId || trackInfo.id}`;
       
       const bitDepth = trackInfo.bitDepth;
       const sampleRate = trackInfo.sampleRate;
@@ -542,7 +545,7 @@ export function useAudioQueue(): QueueController {
         addedAt: Date.now(),
         sourceUri: trackInfo.contentUri,
         sourceType: 'media-store',
-        mediaStoreId: trackInfo.id,
+        mediaStoreId: trackInfo.mediaStoreId || trackInfo.id,
         dateModified: trackInfo.dateModified,
         sourceVersionKey: trackInfo.sourceVersionKey,
         unavailable: false,
@@ -572,6 +575,7 @@ export function useAudioQueue(): QueueController {
         duration: metadata.duration,
         fileName: metadata.fileName,
         fileType: metadata.fileType,
+        fileSize: trackInfo.size || 0,
         sourceUri: metadata.sourceUri,
         sourceType: metadata.sourceType,
         mediaStoreId: metadata.mediaStoreId,
@@ -681,13 +685,13 @@ export function useAudioQueue(): QueueController {
             return unavailableTrack;
           }
 
-          const sourceVersionKey = match.sourceVersionKey || `${match.id}:${match.size}:${match.dateModified || 0}`;
+          const sourceVersionKey = match.sourceVersionKey || `${match.mediaStoreId || match.id}:${match.size}:${match.dateModified || 0}`;
           const fingerprint = musicLibraryDB.generateFingerprint(match.name, match.size || 0, {
             duration: match.duration || 0,
             artist: match.artist,
             title: match.title,
             sourceType: 'media-store',
-            mediaStoreId: match.id,
+            mediaStoreId: match.mediaStoreId || match.id,
           });
 
           const nextTrack: Track = {
@@ -698,9 +702,10 @@ export function useAudioQueue(): QueueController {
             fileName: match.name || track.fileName,
             fileType: match.mimeType || track.fileType,
             sourceUri: match.contentUri || track.sourceUri,
-            mediaStoreId: match.id,
+            mediaStoreId: match.mediaStoreId || match.id,
             dateModified: match.dateModified,
             sourceVersionKey,
+            fileSize: match.size || 0,
             unavailable: false,
             unavailableReason: '',
             missingCount: 0,
