@@ -1,12 +1,17 @@
 import { useEffect, useState } from 'react';
 import { logger } from "@/lib/logger";
 
+const ANDROID_FAST_STREAMING_ENABLED = false;
+
 export interface AndroidMusicFile {
   id: string;
+  stableId?: string;
+  mediaStoreId?: string;
   name: string;
   title?: string;
   artist?: string;
   album?: string;
+  albumId?: number;
   contentUri: string;
   path?: string;
   size: number;
@@ -19,6 +24,7 @@ export interface AndroidMusicFile {
   isHiRes?: boolean;
   dateModified?: number;
   sourceVersionKey?: string;
+  sourceType?: 'media-store' | 'manual-uri';
 }
 
 export interface ScanProgress {
@@ -254,7 +260,7 @@ export function useAndroidMusicLibrary() {
   const getAudioFileUrl = async (
     contentUri: string,
     trackId: string,
-    options?: { expectedSize?: number; sourceVersionKey?: string },
+    options?: { expectedSize?: number; sourceVersionKey?: string; allowStreaming?: boolean },
   ): Promise<string | null> => {
     try {
       const MusicScanner = getPlugin();
@@ -270,8 +276,14 @@ export function useAndroidMusicLibrary() {
         trackId,
         expectedSize: options?.expectedSize,
         sourceVersionKey: options?.sourceVersionKey,
+        allowStreaming: options?.allowStreaming ?? ANDROID_FAST_STREAMING_ENABLED,
       });
       
+      if ((options?.allowStreaming ?? ANDROID_FAST_STREAMING_ENABLED) && result?.streamUrl) {
+        logger.debug('✅ URL de streaming obtenida', { streamUrl: result.streamUrl, cached: result.cached });
+        return result.streamUrl;
+      }
+
       if (result?.filePath) {
         // Convertir la ruta del archivo a una URL que Capacitor puede servir
         const baseUrl = (window as any).Capacitor.convertFileSrc(result.filePath);
@@ -293,6 +305,30 @@ export function useAndroidMusicLibrary() {
   /**
    * Limpia la caché de archivos de audio
    */
+
+  const prepareAudioFileUrl = async (
+    contentUri: string,
+    trackId: string,
+    options?: { expectedSize?: number; sourceVersionKey?: string; allowStreaming?: boolean },
+  ): Promise<boolean> => {
+    try {
+      const MusicScanner = getPlugin();
+      if (!MusicScanner?.prepareAudioFileUrl) {
+        return false;
+      }
+      await MusicScanner.prepareAudioFileUrl({
+        contentUri,
+        trackId,
+        expectedSize: options?.expectedSize,
+        sourceVersionKey: options?.sourceVersionKey,
+      });
+      return true;
+    } catch (err) {
+      logger.warn('Error preparando URL de audio:', err);
+      return false;
+    }
+  };
+
   const clearAudioCache = async (): Promise<boolean> => {
     try {
       const MusicScanner = getPlugin();
@@ -335,6 +371,7 @@ export function useAndroidMusicLibrary() {
     requestPermissions,
     checkPermissions,
     getAudioFileUrl,
+    prepareAudioFileUrl,
     getLibraryPage,
     getAlbumArt,
     clearAudioCache,
