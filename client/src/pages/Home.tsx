@@ -176,6 +176,7 @@ export default function Home() {
   const playTimeoutRef = useRef<number | null>(null);
   const autoOptimizationTimeoutRef = useRef<number | null>(null);
   const failedQueueTrackIdsRef = useRef<Set<string>>(new Set());
+  const nextPrefetchKeyRef = useRef<string | null>(null);
   const mediaStoreReconciledRef = useRef(false);
 
   const hiResTracks = useMemo(
@@ -394,12 +395,14 @@ export default function Home() {
 
   const resolveTrackSource = useCallback(
     async (track: Track): Promise<File | string> => {
-      if (track.sourceType === "media-store" && track.sourceUri) {
+      if ((track.sourceType === "media-store" || track.sourceType === "manual-uri") && track.sourceUri) {
         if (track.unavailable) {
           throw new Error("Track source not available");
         }
 
+        const resolveStartMs = performance.now();
         const stableLibraryTrack =
+          queue.library.find((libraryTrack) => libraryTrack.id === track.id) ??
           (track.sourceTrackId
             ? queue.library.find(
                 (libraryTrack) => libraryTrack.id === track.sourceTrackId,
@@ -407,7 +410,8 @@ export default function Home() {
             : null) ??
           queue.library.find(
             (libraryTrack) =>
-              libraryTrack.sourceType === "media-store" &&
+              (libraryTrack.sourceType === "media-store" ||
+                libraryTrack.sourceType === "manual-uri") &&
               libraryTrack.sourceUri === track.sourceUri,
           );
 
@@ -415,10 +419,19 @@ export default function Home() {
           track.sourceUri,
           stableLibraryTrack?.id ?? track.sourceTrackId ?? track.id,
           {
-            expectedSize: stableLibraryTrack?.file?.size,
-            sourceVersionKey: stableLibraryTrack?.sourceVersionKey,
+            expectedSize: stableLibraryTrack?.fileSize ?? track.fileSize,
+            sourceVersionKey: stableLibraryTrack?.sourceVersionKey ?? track.sourceVersionKey,
           },
         );
+        const resolveEndMs = performance.now();
+        console.info("[PlaybackLatency] resolveTrackSource", {
+          trackId: track.id,
+          sourceTrackId: track.sourceTrackId,
+          sourceUri: track.sourceUri,
+          resolveStartMs,
+          resolveEndMs,
+          resolveDurationMs: resolveEndMs - resolveStartMs,
+        });
 
         if (!fileUrl) {
           throw new Error("No se pudo obtener el audio del dispositivo");
@@ -436,6 +449,50 @@ export default function Home() {
     },
     [androidMusicLibrary, queue.getTrackFile, queue.library],
   );
+
+
+  useEffect(() => {
+    const nextTrack = queue.queue[queue.currentTrackIndex + 1];
+    if (
+      !nextTrack ||
+      (nextTrack.sourceType !== "media-store" && nextTrack.sourceType !== "manual-uri") ||
+      !nextTrack.sourceUri
+    ) {
+      return;
+    }
+
+    const prefetchKey = `${nextTrack.sourceTrackId ?? nextTrack.id}:${nextTrack.sourceUri}:${nextTrack.sourceVersionKey ?? ""}`;
+    if (nextPrefetchKeyRef.current === prefetchKey) {
+      return;
+    }
+    nextPrefetchKeyRef.current = prefetchKey;
+
+    const stableLibraryTrack =
+      queue.library.find((libraryTrack) => libraryTrack.id === nextTrack.id) ??
+      (nextTrack.sourceTrackId
+        ? queue.library.find((libraryTrack) => libraryTrack.id === nextTrack.sourceTrackId)
+        : undefined) ??
+      queue.library.find(
+        (libraryTrack) =>
+          (libraryTrack.sourceType === "media-store" ||
+            libraryTrack.sourceType === "manual-uri") &&
+          libraryTrack.sourceUri === nextTrack.sourceUri,
+      );
+
+    void androidMusicLibrary.prepareAudioFileUrl?.(
+      nextTrack.sourceUri,
+      stableLibraryTrack?.id ?? nextTrack.sourceTrackId ?? nextTrack.id,
+      {
+        expectedSize: stableLibraryTrack?.fileSize ?? nextTrack.fileSize,
+        sourceVersionKey: stableLibraryTrack?.sourceVersionKey ?? nextTrack.sourceVersionKey,
+      },
+    );
+  }, [
+    androidMusicLibrary,
+    queue.currentTrackIndex,
+    queue.library,
+    queue.queue,
+  ]);
 
   const playNextAvailableTrackAfterFailure = useCallback(
     (failedQueueTrackId: string) => {
@@ -589,9 +646,12 @@ export default function Home() {
             return;
           }
 
-          await audioProcessor.loadFile(source, dspParams);
+          const loaded = await audioProcessor.loadFile(source, dspParams, {
+            requestId,
+            isCurrentRequest: () => trackLoadRequestRef.current === requestId,
+          });
 
-          if (trackLoadRequestRef.current !== requestId) {
+          if (!loaded || trackLoadRequestRef.current !== requestId) {
             return;
           }
         } catch (error) {
@@ -631,10 +691,12 @@ export default function Home() {
 
     const loadTrack = async () => {
       const libraryTrack = queue.library.find(
+        (track) => track.id === requestedTrack.id,
+      ) ?? (requestedTrack.sourceTrackId
+        ? queue.library.find((track) => track.id === requestedTrack.sourceTrackId)
+        : undefined) ?? queue.library.find(
         (track) =>
-          track.sourceUri === requestedTrack.sourceUri ||
-          (track.title === requestedTrack.title &&
-            track.artist === requestedTrack.artist),
+          !!requestedTrack.sourceUri && track.sourceUri === requestedTrack.sourceUri,
       );
 
       if (libraryTrack) {
@@ -642,7 +704,10 @@ export default function Home() {
       }
 
       try {
+        const playbackRequestStartMs = performance.now();
+        const resolveStartMs = playbackRequestStartMs;
         const source = await resolveTrackSource(requestedTrack);
+        const resolveEndMs = performance.now();
 
         if (
           trackLoadRequestRef.current !== requestId ||
@@ -651,26 +716,40 @@ export default function Home() {
           return;
         }
 
-        await audioProcessor.loadFile(source, dspParams);
+        const loadFileStartMs = performance.now();
+        const loaded = await audioProcessor.loadFile(source, dspParams, {
+          requestId,
+          isCurrentRequest: () =>
+            trackLoadRequestRef.current === requestId &&
+            queue.currentTrack?.id === requestedTrack.id,
+        });
+        const loadFileEndMs = performance.now();
 
         if (
+          !loaded ||
           trackLoadRequestRef.current !== requestId ||
           queue.currentTrack?.id !== requestedTrack.id
         ) {
           return;
         }
 
-        playTimeoutRef.current = window.setTimeout(() => {
-          if (
-            trackLoadRequestRef.current !== requestId ||
-            queue.currentTrack?.id !== requestedTrack.id
-          ) {
-            return;
-          }
+        const playCallMs = performance.now();
+        console.info("[PlaybackLatency] playRequest", {
+          trackId: requestedTrack.id,
+          sourceTrackId: requestedTrack.sourceTrackId,
+          playbackRequestStartMs,
+          resolveStartMs,
+          resolveEndMs,
+          loadFileStartMs,
+          loadFileEndMs,
+          playCallMs,
+          resolveDurationMs: resolveEndMs - resolveStartMs,
+          loadFileDurationMs: loadFileEndMs - loadFileStartMs,
+          totalBeforePlayMs: playCallMs - playbackRequestStartMs,
+        });
+        audioProcessor.play();
 
-          audioProcessor.play();
-
-          autoOptimizationTimeoutRef.current = window.setTimeout(() => {
+        autoOptimizationTimeoutRef.current = window.setTimeout(() => {
             if (
               trackLoadRequestRef.current !== requestId ||
               queue.currentTrack?.id !== requestedTrack.id
@@ -680,7 +759,6 @@ export default function Home() {
 
             void runAutoOptimization();
           }, 1400);
-        }, 100);
       } catch (error) {
         if (
           trackLoadRequestRef.current === requestId &&
