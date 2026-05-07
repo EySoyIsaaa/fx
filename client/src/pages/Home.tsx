@@ -55,6 +55,7 @@ import {
 import { useLanguage } from "@/hooks/useLanguage";
 import {
   useAndroidMusicLibrary,
+  type AndroidAudioFileUrlResult,
   type AndroidMusicFile,
 } from "@/hooks/useAndroidMusicLibrary";
 import { hiresAudioBadgeUrl, hiresLogoUrl } from "@/lib/assetUrls";
@@ -79,6 +80,11 @@ type HomeNavigationSnapshot = {
   duplicatesModalOpen: boolean;
 };
 
+type ResolvedTrackPlaybackSource = {
+  source: File | string;
+  resolveResult?: AndroidAudioFileUrlResult;
+};
+
 const HOME_NAVIGATION_STATE_KEY = "__epicenterHomeNav";
 
 const clampDspParam = (key: keyof StreamingParams, value: number): number => {
@@ -95,7 +101,7 @@ const clampDspParam = (key: keyof StreamingParams, value: number): number => {
   }
 };
 
-const ANDROID_FAST_STREAMING_ENABLED = false;
+const ANDROID_FAST_STREAMING_ENABLED = true;
 const ANDROID_PREFETCH_ENABLED = false;
 
 const clampDspParams = (params: StreamingParams): StreamingParams => ({
@@ -419,7 +425,10 @@ export default function Home() {
   }, []);
 
   const resolveTrackSource = useCallback(
-    async (track: Track): Promise<File | string> => {
+    async (
+      track: Track,
+      context?: { requestId?: number; reason?: string },
+    ): Promise<ResolvedTrackPlaybackSource> => {
       if (track.sourceUri && track.sourceType !== "file") {
         if (track.unavailable) {
           throw new Error("Track source not available");
@@ -438,7 +447,7 @@ export default function Home() {
           );
 
         const resolvedTrackId = stableLibraryTrack?.id ?? track.sourceTrackId ?? track.id;
-        const fileUrl = await androidMusicLibrary.getAudioFileUrl(
+        const result = await androidMusicLibrary.getAudioFileUrlResult(
           track.sourceUri,
           resolvedTrackId,
           {
@@ -447,13 +456,17 @@ export default function Home() {
             allowStreaming: ANDROID_FAST_STREAMING_ENABLED,
           },
         );
+        const fileUrl = result?.url ?? null;
         console.info("[RESOLVE_RESULT]", {
-          requestId: trackLoadRequestRef.current,
+          requestId: context?.requestId ?? trackLoadRequestRef.current,
+          reason: context?.reason,
           source: fileUrl,
           sourceType: track.sourceType,
-          cacheHit: fileUrl ? !fileUrl.startsWith("http://127.0.0.1") : false,
-          streamUrlUsed: !!fileUrl?.startsWith("http://127.0.0.1"),
-          filePathUsed: !!fileUrl && !fileUrl.startsWith("http://127.0.0.1"),
+          streamUrlUsed: !!result?.streamUrl,
+          filePathUsed: !!result?.filePath || (!!fileUrl && !fileUrl.startsWith("http://127.0.0.1")),
+          cacheHit: result?.cacheHit ?? result?.cached ?? false,
+          copyTimeMs: result?.copyTimeMs ?? 0,
+          resolveDurationMs: result?.resolveDurationMs ?? performance.now() - resolveStartMs,
         });
         console.info("[LOAD_DEBUG_SOURCE]", {
           requestedTrackId: track.id,
@@ -481,7 +494,7 @@ export default function Home() {
           throw new Error("No se pudo obtener el audio del dispositivo");
         }
 
-        return fileUrl;
+        return { source: fileUrl, resolveResult: result ?? undefined };
       }
 
       const trackFile = track.file ?? (await queue.getTrackFile(track));
@@ -489,7 +502,7 @@ export default function Home() {
         throw new Error("Track source not available");
       }
 
-      return trackFile;
+      return { source: trackFile };
     },
     [androidMusicLibrary, queue.getTrackFile, queue.library],
   );
@@ -680,7 +693,10 @@ export default function Home() {
         queue.playTrack(0);
 
         try {
-          const source = await resolveTrackSource(track);
+          const { source } = await resolveTrackSource(track, {
+            requestId,
+            reason: "restore_last_track",
+          });
 
           if (trackLoadRequestRef.current !== requestId) {
             return;
@@ -754,7 +770,10 @@ export default function Home() {
         try {
           const playbackRequestStartMs = performance.now();
           const resolveStartMs = playbackRequestStartMs;
-          const source = await resolveTrackSource(requestedTrack);
+          const { source, resolveResult } = await resolveTrackSource(requestedTrack, {
+            requestId,
+            reason,
+          });
           const resolveEndMs = performance.now();
 
           if (
@@ -800,11 +819,12 @@ export default function Home() {
           setPendingTrack(null);
           setActiveAudioSource(activeSrc);
           console.info("[NOW_PLAYING_COMMIT]", {
-            reason,
             requestId,
-            nowPlayingTrackId: requestedTrack.id,
-            activeSrc,
+            reason,
             title: requestedTrack.title,
+            activeSrc,
+            totalTimeToCommitMs: loadFileEndMs - playbackRequestStartMs,
+            streamUrlUsed: !!resolveResult?.streamUrl,
           });
 
           const playCallMs = performance.now();

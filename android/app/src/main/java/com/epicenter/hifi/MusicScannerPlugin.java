@@ -622,11 +622,16 @@ public class MusicScannerPlugin extends Plugin {
       TrackEntity linked = dao().getByStableId(trackId);
       if (linked == null) linked = dao().getByMediaStoreId(trackId);
       if (linked == null) linked = dao().findBySourceUri(contentUri);
+      boolean hasValidSourceUri = contentUri != null && !contentUri.trim().isEmpty();
       boolean linkedMatchesRequested =
         linked != null &&
-        contentUri != null &&
+        hasValidSourceUri &&
         linked.sourceUri != null &&
         linked.sourceUri.equals(contentUri);
+      boolean linkedIdMatchesRequested =
+        linked != null &&
+        trackId != null &&
+        (trackId.equals(linked.stableId) || trackId.equals(linked.mediaStoreId));
       if (linked != null && !linkedMatchesRequested && linked.cachedFilePath != null && !linked.cachedFilePath.isEmpty()) {
         android.util.Log.w("MusicScanner", "linkedCacheRejected sourceUri mismatch requested=" + contentUri + " linked=" + linked.sourceUri + " linkedStableId=" + linked.stableId);
       }
@@ -701,25 +706,33 @@ public class MusicScannerPlugin extends Plugin {
         }
       }
 
-      if (allowStreaming && linkedMatchesRequested && linked != null) {
+      if (allowStreaming && linkedMatchesRequested && linkedIdMatchesRequested && linked != null) {
         ensureAudioServerStarted();
-        String streamUrl = "http://127.0.0.1:" + audioServerPort + "/audio/" + URLEncoder.encode(linked.stableId, "UTF-8") + "?token=" + URLEncoder.encode(audioSessionToken, "UTF-8") + "&sourceUri=" + URLEncoder.encode(contentUri, "UTF-8") + "&v=" + cacheHash;
-        JSObject stream = new JSObject();
-        stream.put("streamUrl", streamUrl);
-        stream.put("resolvedUrl", streamUrl);
-        stream.put("mimeType", mimeType);
-        stream.put("cached", false);
-        stream.put("cacheKey", cacheHash);
-        stream.put("resolvedStableId", linked.stableId);
-        stream.put("playbackResolveTimeMs", System.currentTimeMillis() - resolveStart);
-        stream.put("cacheHit", false);
-        stream.put("fastPath", true);
-        stream.put("copyTimeMs", 0);
-        stream.put("copiedBytes", 0);
-        stream.put("bufferSize", AUDIO_BUFFER_SIZE);
-        stream.put("rejectReason", "streaming_no_cache");
-        android.util.Log.i("MusicScanner", "playbackResolvedUrl=" + streamUrl + " playbackResolveTimeMs=" + (System.currentTimeMillis() - resolveStart) + " cacheHit=false copyTimeMs=0 copiedBytes=0 bufferSize=" + AUDIO_BUFFER_SIZE + " fastPath=true rejectReason=streaming_no_cache");
-        return stream;
+        if (audioServerSocket != null && !audioServerSocket.isClosed() && audioServerPort > 0) {
+          String streamUrl = "http://127.0.0.1:" + audioServerPort + "/audio/" + URLEncoder.encode(linked.stableId, "UTF-8") + "?token=" + URLEncoder.encode(audioSessionToken, "UTF-8") + "&sourceUri=" + URLEncoder.encode(contentUri, "UTF-8") + "&v=" + cacheHash;
+          JSObject stream = new JSObject();
+          stream.put("streamUrl", streamUrl);
+          stream.put("resolvedUrl", streamUrl);
+          stream.put("mimeType", mimeType);
+          stream.put("cached", false);
+          stream.put("cacheKey", cacheHash);
+          stream.put("resolvedStableId", linked.stableId);
+          stream.put("playbackResolveTimeMs", System.currentTimeMillis() - resolveStart);
+          stream.put("cacheHit", false);
+          stream.put("fastPath", true);
+          stream.put("copyTimeMs", 0);
+          stream.put("copiedBytes", 0);
+          stream.put("bufferSize", AUDIO_BUFFER_SIZE);
+          stream.put("sourceUriMatches", true);
+          stream.put("stableIdMatches", true);
+          stream.put("audioServerPort", audioServerPort);
+          stream.put("rejectReason", "streaming_no_cache");
+          android.util.Log.i("MusicScanner", "playbackResolvedUrl=" + streamUrl + " playbackResolveTimeMs=" + (System.currentTimeMillis() - resolveStart) + " cacheHit=false copyTimeMs=0 copiedBytes=0 bufferSize=" + AUDIO_BUFFER_SIZE + " fastPath=true rejectReason=streaming_no_cache sourceUriMatches=true stableIdMatches=true audioServerPort=" + audioServerPort);
+          return stream;
+        }
+        android.util.Log.w("MusicScanner", "streamingRejected reason=audio_server_not_active stableId=" + linked.stableId + " sourceUri=" + contentUri);
+      } else if (allowStreaming) {
+        android.util.Log.w("MusicScanner", "streamingRejected reason=guards_failed hasValidSourceUri=" + hasValidSourceUri + " sourceUriMatches=" + linkedMatchesRequested + " stableIdMatches=" + linkedIdMatchesRequested + " trackId=" + trackId + " linkedStableId=" + (linked != null ? linked.stableId : ""));
       }
       
       // Copiar archivo desde content:// a caché (1 retry simple)

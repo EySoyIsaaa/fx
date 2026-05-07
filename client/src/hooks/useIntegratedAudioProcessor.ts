@@ -841,6 +841,7 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
       timeoutMs: number,
       isCurrentRequest: () => boolean,
       requestId?: number,
+      loadStartMs = performance.now(),
     ): Promise<{ ready: boolean; event: string }> =>
       new Promise((resolve) => {
         let settled = false;
@@ -860,6 +861,7 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
             requestId,
             ready,
             event,
+            loadDurationMs: performance.now() - loadStartMs,
             activeSrc: audioElement.currentSrc || audioElement.src,
           });
           resolve({ ready, event });
@@ -1013,6 +1015,7 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
       if (cancelIfStale()) return false;
 
       const audioElement = new Audio();
+      const loadStartMs = performance.now();
       let pendingObjectUrl: string | null = null;
       let newSource = newSourcePreview;
 
@@ -1051,6 +1054,7 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
         12000,
         isCurrentRequest,
         requestId,
+        loadStartMs,
       );
       if (!readyResult.ready || cancelIfStale(audioElement, pendingObjectUrl)) {
         cleanupPendingAudio(audioElement, pendingObjectUrl);
