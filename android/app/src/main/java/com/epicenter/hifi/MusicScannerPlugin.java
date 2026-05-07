@@ -862,7 +862,15 @@ public class MusicScannerPlugin extends Plugin {
       socket.setSoTimeout(30000);
       BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
       String requestLine = reader.readLine();
-      if (requestLine == null || !requestLine.startsWith("GET ")) {
+      if (requestLine == null) {
+        writeHttpError(socket, 400, "Bad Request");
+        return;
+      }
+      if (requestLine.startsWith("OPTIONS ")) {
+        writeHttpOptions(socket);
+        return;
+      }
+      if (!requestLine.startsWith("GET ")) {
         writeHttpError(socket, 405, "Method Not Allowed");
         return;
       }
@@ -924,6 +932,7 @@ public class MusicScannerPlugin extends Plugin {
       PrintWriter writer = new PrintWriter(socket.getOutputStream(), false);
       writer.print("HTTP/1.1 " + (range.partial ? "206 Partial Content" : "200 OK") + "\r\n");
       writer.print("Content-Type: " + mimeType + "\r\n");
+      writeCorsHeaders(writer);
       writer.print("Accept-Ranges: bytes\r\n");
       if (contentLength >= 0) writer.print("Content-Length: " + contentLength + "\r\n");
       if (range.partial && size > 0) writer.print("Content-Range: bytes " + range.start + "-" + range.end + "/" + size + "\r\n");
@@ -1034,6 +1043,7 @@ public class MusicScannerPlugin extends Plugin {
   private void writeRangeNotSatisfiable(Socket socket, long size) throws Exception {
     PrintWriter writer = new PrintWriter(socket.getOutputStream(), false);
     writer.print("HTTP/1.1 416 Range Not Satisfiable\r\n");
+    writeCorsHeaders(writer);
     writer.print("Accept-Ranges: bytes\r\n");
     writer.print("Content-Range: bytes */" + (size > 0 ? String.valueOf(size) : "*") + "\r\n");
     writer.print("Content-Length: 0\r\n");
@@ -1041,9 +1051,26 @@ public class MusicScannerPlugin extends Plugin {
     writer.flush();
   }
 
+  private void writeHttpOptions(Socket socket) throws Exception {
+    PrintWriter writer = new PrintWriter(socket.getOutputStream(), false);
+    writer.print("HTTP/1.1 204 No Content\r\n");
+    writeCorsHeaders(writer);
+    writer.print("Content-Length: 0\r\n");
+    writer.print("Connection: close\r\n\r\n");
+    writer.flush();
+  }
+
+  private void writeCorsHeaders(PrintWriter writer) {
+    writer.print("Access-Control-Allow-Origin: *\r\n");
+    writer.print("Access-Control-Allow-Methods: GET, OPTIONS\r\n");
+    writer.print("Access-Control-Allow-Headers: Range, Origin, Accept, Content-Type\r\n");
+    writer.print("Access-Control-Expose-Headers: Accept-Ranges, Content-Length, Content-Range, Content-Type\r\n");
+  }
+
   private void writeHttpError(Socket socket, int code, String message) throws Exception {
     PrintWriter writer = new PrintWriter(socket.getOutputStream(), false);
     writer.print("HTTP/1.1 " + code + " " + message + "\r\n");
+    writeCorsHeaders(writer);
     writer.print("Content-Type: text/plain\r\n");
     writer.print("Content-Length: 0\r\n");
     writer.print("Connection: close\r\n\r\n");

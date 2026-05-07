@@ -173,6 +173,7 @@ export default function Home() {
   const lastAutoPresetTrackRef = useRef<string | null>(null);
   const lastAutoPresetTimeRef = useRef(0);
   const trackLoadRequestRef = useRef(0);
+  const currentTrackIdRef = useRef<string | null>(null);
   const playTimeoutRef = useRef<number | null>(null);
   const autoOptimizationTimeoutRef = useRef<number | null>(null);
   const failedQueueTrackIdsRef = useRef<Set<string>>(new Set());
@@ -382,6 +383,11 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [dspParams, audioProcessor.eqBands]);
 
+
+  useEffect(() => {
+    currentTrackIdRef.current = queue.currentTrack?.id ?? null;
+  }, [queue.currentTrack?.id]);
+
   const clearPendingPlaybackTimers = useCallback(() => {
     if (playTimeoutRef.current !== null) {
       window.clearTimeout(playTimeoutRef.current);
@@ -395,7 +401,7 @@ export default function Home() {
 
   const resolveTrackSource = useCallback(
     async (track: Track): Promise<File | string> => {
-      if ((track.sourceType === "media-store" || track.sourceType === "manual-uri") && track.sourceUri) {
+      if (track.sourceUri && track.sourceType !== "file") {
         if (track.unavailable) {
           throw new Error("Track source not available");
         }
@@ -409,20 +415,30 @@ export default function Home() {
               )
             : null) ??
           queue.library.find(
-            (libraryTrack) =>
-              (libraryTrack.sourceType === "media-store" ||
-                libraryTrack.sourceType === "manual-uri") &&
-              libraryTrack.sourceUri === track.sourceUri,
+            (libraryTrack) => libraryTrack.sourceUri === track.sourceUri,
           );
 
+        const resolvedTrackId = stableLibraryTrack?.id ?? track.sourceTrackId ?? track.id;
         const fileUrl = await androidMusicLibrary.getAudioFileUrl(
           track.sourceUri,
-          stableLibraryTrack?.id ?? track.sourceTrackId ?? track.id,
+          resolvedTrackId,
           {
             expectedSize: stableLibraryTrack?.fileSize ?? track.fileSize,
             sourceVersionKey: stableLibraryTrack?.sourceVersionKey ?? track.sourceVersionKey,
           },
         );
+        console.info("[LOAD_DEBUG_SOURCE]", {
+          requestedTrackId: track.id,
+          requestedTrackSourceTrackId: track.sourceTrackId,
+          requestedTrackTitle: track.title,
+          requestedTrackSourceType: track.sourceType,
+          requestedTrackSourceUri: track.sourceUri,
+          requestedTrackMediaStoreId: track.mediaStoreId,
+          requestedTrackFileSize: track.fileSize,
+          stableLibraryTrackId: stableLibraryTrack?.id,
+          resolvedTrackId,
+          sourceFinal: fileUrl,
+        });
         const resolveEndMs = performance.now();
         console.info("[PlaybackLatency] resolveTrackSource", {
           trackId: track.id,
@@ -453,11 +469,7 @@ export default function Home() {
 
   useEffect(() => {
     const nextTrack = queue.queue[queue.currentTrackIndex + 1];
-    if (
-      !nextTrack ||
-      (nextTrack.sourceType !== "media-store" && nextTrack.sourceType !== "manual-uri") ||
-      !nextTrack.sourceUri
-    ) {
+    if (!nextTrack || !nextTrack.sourceUri || nextTrack.sourceType === "file") {
       return;
     }
 
@@ -473,10 +485,7 @@ export default function Home() {
         ? queue.library.find((libraryTrack) => libraryTrack.id === nextTrack.sourceTrackId)
         : undefined) ??
       queue.library.find(
-        (libraryTrack) =>
-          (libraryTrack.sourceType === "media-store" ||
-            libraryTrack.sourceType === "manual-uri") &&
-          libraryTrack.sourceUri === nextTrack.sourceUri,
+        (libraryTrack) => libraryTrack.sourceUri === nextTrack.sourceUri,
       );
 
     void androidMusicLibrary.prepareAudioFileUrl?.(
@@ -711,7 +720,7 @@ export default function Home() {
 
         if (
           trackLoadRequestRef.current !== requestId ||
-          queue.currentTrack?.id !== requestedTrack.id
+          currentTrackIdRef.current !== requestedTrack.id
         ) {
           return;
         }
@@ -721,14 +730,22 @@ export default function Home() {
           requestId,
           isCurrentRequest: () =>
             trackLoadRequestRef.current === requestId &&
-            queue.currentTrack?.id === requestedTrack.id,
+            currentTrackIdRef.current === requestedTrack.id,
         });
         const loadFileEndMs = performance.now();
+        const isCurrentAfterLoad =
+          trackLoadRequestRef.current === requestId &&
+          currentTrackIdRef.current === requestedTrack.id;
+        console.info("[LOAD_FILE_RESULT]", {
+          requestId,
+          loaded,
+          source,
+          isCurrentRequest: isCurrentAfterLoad,
+        });
 
         if (
           !loaded ||
-          trackLoadRequestRef.current !== requestId ||
-          queue.currentTrack?.id !== requestedTrack.id
+          !isCurrentAfterLoad
         ) {
           return;
         }
@@ -752,7 +769,7 @@ export default function Home() {
         autoOptimizationTimeoutRef.current = window.setTimeout(() => {
             if (
               trackLoadRequestRef.current !== requestId ||
-              queue.currentTrack?.id !== requestedTrack.id
+              currentTrackIdRef.current !== requestedTrack.id
             ) {
               return;
             }
