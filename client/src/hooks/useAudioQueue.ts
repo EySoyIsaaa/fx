@@ -79,7 +79,7 @@ export interface QueueController {
   playNow: (track: Track) => void;
   removeFromQueue: (id: string) => void;
   clearQueue: () => void;
-  shuffleAll: (tracks: Track[]) => void;
+  shuffleAll: (tracks: Track[], firstTrackId?: string) => void;
   reorderQueue: (fromIndex: number, toIndex: number) => void;
   // Controles de reproducción
   playTrack: (index: number) => void;
@@ -906,7 +906,7 @@ export function useAudioQueue(): QueueController {
   }, [createQueueTrack]);
 
   // Reproducir toda la biblioteca en orden aleatorio (limpia cola actual)
-  const shuffleAll = useCallback((tracks: Track[]) => {
+  const shuffleAll = useCallback((tracks: Track[], firstTrackId?: string) => {
     if (tracks.length === 0) return;
     
     const shuffleOnce = (source: Track[]) => {
@@ -926,6 +926,15 @@ export function useAudioQueue(): QueueController {
       shuffled = shuffleOnce(tracks);
       signature = shuffled.map((track) => track.id).join('|');
       attempts += 1;
+    }
+
+    if (firstTrackId && shuffled.length > 1) {
+      const firstIndex = shuffled.findIndex((track) => track.id === firstTrackId);
+      if (firstIndex > 0) {
+        const [firstTrack] = shuffled.splice(firstIndex, 1);
+        shuffled.unshift(firstTrack);
+        signature = shuffled.map((track) => track.id).join('|');
+      }
     }
 
     lastShuffleSignatureRef.current = signature;
