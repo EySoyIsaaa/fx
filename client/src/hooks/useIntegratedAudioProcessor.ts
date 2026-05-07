@@ -341,6 +341,7 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
   const audioContextRef = useRef<AudioContext | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const activeLoadRequestIdRef = useRef<number | undefined>(undefined);
   const analyserNodeRef = useRef<AnalyserNode | null>(null);
   const eqFiltersRef = useRef<BiquadFilterNode[]>([]);
   const eqLowFiltersRef = useRef<BiquadFilterNode[]>([]);
@@ -839,29 +840,52 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
       params: StreamingParams,
       requestGuard?: LoadFileRequestGuard,
     ): Promise<boolean> => {
+      const requestId = requestGuard?.requestId;
       const isCurrentRequest = () => requestGuard?.isCurrentRequest?.() ?? true;
-      const cleanupPendingAudio = (audioElement?: HTMLAudioElement | null, objectUrl?: string | null) => {
-        if (audioElement) {
+      const cleanupAudioElement = (audioElement?: HTMLAudioElement | null) => {
+        if (!audioElement) return;
+        try {
+          audioElement.pause();
+          audioElement.removeAttribute("src");
+          audioElement.src = "";
+          audioElement.load();
+        } catch (error) {
+          console.warn("[AudioResolve] Error cleaning audio element", error);
+        }
+      };
+      const cleanupPendingAudio = (
+        audioElement?: HTMLAudioElement | null,
+        objectUrl?: string | null,
+        sourceNode?: MediaElementAudioSourceNode | null,
+      ) => {
+        if (sourceNode) {
           try {
-            audioElement.pause();
-            audioElement.src = "";
-            audioElement.load();
-          } catch (error) {
-            console.warn("[AudioResolve] Error cleaning cancelled audio element", error);
+            sourceNode.disconnect();
+          } catch (_error) {
+            // no-op: node may already be disconnected
           }
         }
+        cleanupAudioElement(audioElement);
         if (objectUrl) {
           URL.revokeObjectURL(objectUrl);
         }
       };
-      const cancelIfStale = (audioElement?: HTMLAudioElement | null, objectUrl?: string | null) => {
+      const cancelIfStale = (
+        audioElement?: HTMLAudioElement | null,
+        objectUrl?: string | null,
+        sourceNode?: MediaElementAudioSourceNode | null,
+      ) => {
         if (isCurrentRequest()) {
           return false;
         }
-        cleanupPendingAudio(audioElement, objectUrl);
+        cleanupPendingAudio(audioElement, objectUrl, sourceNode);
         if (audioElement && audioElementRef.current === audioElement) {
           if (sourceNodeRef.current) {
-            sourceNodeRef.current.disconnect();
+            try {
+              sourceNodeRef.current.disconnect();
+            } catch (_error) {
+              // no-op
+            }
             sourceNodeRef.current = null;
           }
           if (objectUrlRef.current) {
@@ -869,6 +893,7 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
             objectUrlRef.current = null;
           }
           audioElementRef.current = null;
+          activeLoadRequestIdRef.current = undefined;
         }
         return true;
       };
@@ -886,79 +911,110 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
       if (cancelIfStale()) return false;
       const ctx = audioContextRef.current!;
 
+      const oldAudioElement = audioElementRef.current;
+      const oldSourceNode = sourceNodeRef.current;
+      const oldSrc = oldAudioElement?.currentSrc || oldAudioElement?.src || "";
+      const hadOldAudio = !!oldAudioElement;
+      const hadOldSourceNode = !!oldSourceNode;
+      const newSourcePreview = typeof file === "string" ? file : file.name;
+
+      console.info("[LOAD_FILE_SWAP]", {
+        requestId,
+        oldSrc,
+        newSource: newSourcePreview,
+        hadOldAudio,
+        hadOldSourceNode,
+      });
+
       if (cancelIfStale()) return false;
 
-      const audioElement = new Audio();
-      let pendingObjectUrl: string | null = null;
-
-      // Configuración para reproducción en background
-      audioElement.preload = "auto";
-      audioElement.crossOrigin = "anonymous";
-
-      // Importante para que siga reproduciendo en background en móviles
-      (audioElement as any).mozAudioChannelType = "content";
-
-      if (cancelIfStale(audioElement, pendingObjectUrl)) return false;
-
-      const previousAudioUrl = audioElementRef.current?.src ?? "";
-      if (typeof file === "string") {
-        audioElement.src = "";
-        audioElement.src = file;
-      } else {
-        pendingObjectUrl = URL.createObjectURL(file);
-        audioElement.src = "";
-        audioElement.src = pendingObjectUrl;
+      if (oldSourceNode) {
+        try {
+          oldSourceNode.disconnect();
+        } catch (_error) {
+          // no-op: node may already be disconnected
+        }
+        if (sourceNodeRef.current === oldSourceNode) {
+          sourceNodeRef.current = null;
+        }
       }
 
-      if (cancelIfStale(audioElement, pendingObjectUrl)) return false;
-
-      if (audioElementRef.current) {
-        audioElementRef.current.pause();
-        audioElementRef.current.currentTime = 0;
-      }
-
-      if (sourceNodeRef.current) {
-        sourceNodeRef.current.disconnect();
-        sourceNodeRef.current = null;
+      if (oldAudioElement) {
+        cleanupAudioElement(oldAudioElement);
+        if (audioElementRef.current === oldAudioElement) {
+          audioElementRef.current = null;
+        }
       }
 
       if (objectUrlRef.current) {
         URL.revokeObjectURL(objectUrlRef.current);
         objectUrlRef.current = null;
       }
+      activeLoadRequestIdRef.current = undefined;
+
+      if (cancelIfStale()) return false;
+
+      const audioElement = new Audio();
+      let pendingObjectUrl: string | null = null;
+      let newSource = newSourcePreview;
+
+      // Configuración para reproducción en background
+      audioElement.crossOrigin = "anonymous";
+      audioElement.preload = "auto";
+
+      // Importante para que siga reproduciendo en background en móviles
+      (audioElement as any).mozAudioChannelType = "content";
+
+      if (cancelIfStale(audioElement, pendingObjectUrl)) return false;
+
+      if (typeof file === "string") {
+        newSource = file;
+      } else {
+        pendingObjectUrl = URL.createObjectURL(file);
+        newSource = pendingObjectUrl;
+      }
+
+      if (cancelIfStale(audioElement, pendingObjectUrl)) return false;
+      audioElement.src = newSource;
+      if (cancelIfStale(audioElement, pendingObjectUrl)) return false;
+      audioElement.load();
+      if (cancelIfStale(audioElement, pendingObjectUrl)) return false;
+
+      let sourceNode: MediaElementAudioSourceNode | null = null;
+      try {
+        sourceNode = ctx.createMediaElementSource(audioElement);
+      } catch (error) {
+        cleanupPendingAudio(audioElement, pendingObjectUrl, sourceNode);
+        console.error("Error creating MediaElementAudioSourceNode:", error);
+        throw error;
+      }
+
+      if (cancelIfStale(audioElement, pendingObjectUrl, sourceNode)) return false;
+
+      sourceNodeRef.current = sourceNode;
+      audioElementRef.current = audioElement;
+      activeLoadRequestIdRef.current = requestId;
       if (pendingObjectUrl) {
         objectUrlRef.current = pendingObjectUrl;
         pendingObjectUrl = null;
       }
 
-      audioElementRef.current = audioElement;
+      console.info("[LOAD_FILE_ACTIVE]", {
+        requestId,
+        activeSrc: audioElement.currentSrc || audioElement.src,
+        sourceNodeSet: !!sourceNodeRef.current,
+      });
       console.log("[AudioResolve]", {
-        requestId: requestGuard?.requestId,
-        previousAudioUrl,
+        requestId,
+        previousAudioUrl: oldSrc,
         newAudioUrl: audioElement.src,
         audioElementSrc: audioElement.src,
       });
 
-      if (cancelIfStale(audioElement, pendingObjectUrl)) return false;
-      audioElement.load();
-      if (cancelIfStale(audioElement, pendingObjectUrl)) return false;
+      // La conexión se hará dinámicamente según el estado de los efectos
+      updateAudioRouting();
 
-      try {
-        if (cancelIfStale(audioElement, pendingObjectUrl)) return false;
-        const sourceNode = ctx.createMediaElementSource(audioElement);
-        if (cancelIfStale(audioElement, pendingObjectUrl)) {
-          sourceNode.disconnect();
-          return false;
-        }
-        sourceNodeRef.current = sourceNode;
-        // La conexión se hará dinámicamente según el estado de los efectos
-        updateAudioRouting();
-      } catch (error) {
-        console.error("Error creating MediaElementAudioSourceNode:", error);
-        throw error;
-      }
-
-      if (cancelIfStale(audioElement, pendingObjectUrl)) return false;
+      if (cancelIfStale(audioElement, pendingObjectUrl, sourceNode)) return false;
 
       // Guardar parámetros iniciales ya normalizados a los topes reales de UI.
       const clampedParams = clampStreamingParams(params);
@@ -1048,7 +1104,7 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
         }
       };
 
-      if (cancelIfStale(audioElement, pendingObjectUrl)) return false;
+      if (cancelIfStale(audioElement, pendingObjectUrl, sourceNode)) return false;
       audioElement.addEventListener("loadedmetadata", onLoadedMetadata);
       audioElement.addEventListener("timeupdate", onTimeUpdate);
       audioElement.addEventListener("ended", onEnded);
@@ -1066,6 +1122,10 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
   const play = useCallback(() => {
     if (!audioElementRef.current || !audioContextRef.current) return;
     const element = audioElementRef.current;
+    console.info("[AUDIO_PLAY_CALL]", {
+      requestId: activeLoadRequestIdRef.current,
+      playingSrc: element.currentSrc || element.src,
+    });
     if (audioContextRef.current.state === "suspended") {
       audioContextRef.current.resume();
     }
