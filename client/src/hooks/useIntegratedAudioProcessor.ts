@@ -297,12 +297,21 @@ export const DEFAULT_EQ_BANDS: EqualizerBand[] = EQ_31_FREQUENCIES.map(
   }),
 );
 
+export interface LoadFileRequestGuard {
+  requestId?: number;
+  isCurrentRequest?: () => boolean;
+}
+
 export interface IntegratedAudioController {
   isReady: boolean;
   isPlaying: boolean;
   currentTime: number;
   duration: number;
-  loadFile: (file: File | string, dspParams: StreamingParams) => Promise<void>;
+  loadFile: (
+    file: File | string,
+    dspParams: StreamingParams,
+    requestGuard?: LoadFileRequestGuard,
+  ) => Promise<boolean>;
   play: () => void;
   pause: () => void;
   seek: (time: number) => void;
@@ -825,7 +834,47 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
   }, []);
 
   const loadFile = useCallback(
-    async (file: File | string, params: StreamingParams) => {
+    async (
+      file: File | string,
+      params: StreamingParams,
+      requestGuard?: LoadFileRequestGuard,
+    ): Promise<boolean> => {
+      const isCurrentRequest = () => requestGuard?.isCurrentRequest?.() ?? true;
+      const cleanupPendingAudio = (audioElement?: HTMLAudioElement | null, objectUrl?: string | null) => {
+        if (audioElement) {
+          try {
+            audioElement.pause();
+            audioElement.src = "";
+            audioElement.load();
+          } catch (error) {
+            console.warn("[AudioResolve] Error cleaning cancelled audio element", error);
+          }
+        }
+        if (objectUrl) {
+          URL.revokeObjectURL(objectUrl);
+        }
+      };
+      const cancelIfStale = (audioElement?: HTMLAudioElement | null, objectUrl?: string | null) => {
+        if (isCurrentRequest()) {
+          return false;
+        }
+        cleanupPendingAudio(audioElement, objectUrl);
+        if (audioElement && audioElementRef.current === audioElement) {
+          if (sourceNodeRef.current) {
+            sourceNodeRef.current.disconnect();
+            sourceNodeRef.current = null;
+          }
+          if (objectUrlRef.current) {
+            URL.revokeObjectURL(objectUrlRef.current);
+            objectUrlRef.current = null;
+          }
+          audioElementRef.current = null;
+        }
+        return true;
+      };
+
+      if (cancelIfStale()) return false;
+
       // Limpiar cualquier crossfade pendiente
       if (crossfadeTimeoutRef.current) {
         clearTimeout(crossfadeTimeoutRef.current);
@@ -834,7 +883,34 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
       isCrossfadingRef.current = false;
 
       await initAudioChain();
+      if (cancelIfStale()) return false;
       const ctx = audioContextRef.current!;
+
+      if (cancelIfStale()) return false;
+
+      const audioElement = new Audio();
+      let pendingObjectUrl: string | null = null;
+
+      // Configuración para reproducción en background
+      audioElement.preload = "auto";
+      audioElement.crossOrigin = "anonymous";
+
+      // Importante para que siga reproduciendo en background en móviles
+      (audioElement as any).mozAudioChannelType = "content";
+
+      if (cancelIfStale(audioElement, pendingObjectUrl)) return false;
+
+      const previousAudioUrl = audioElementRef.current?.src ?? "";
+      if (typeof file === "string") {
+        audioElement.src = "";
+        audioElement.src = file;
+      } else {
+        pendingObjectUrl = URL.createObjectURL(file);
+        audioElement.src = "";
+        audioElement.src = pendingObjectUrl;
+      }
+
+      if (cancelIfStale(audioElement, pendingObjectUrl)) return false;
 
       if (audioElementRef.current) {
         audioElementRef.current.pause();
@@ -846,40 +922,34 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
         sourceNodeRef.current = null;
       }
 
-      const audioElement = new Audio();
-      audioElementRef.current = audioElement;
-
-      // Configuración para reproducción en background
-      audioElement.preload = "auto";
-      audioElement.crossOrigin = "anonymous";
-
-      // Importante para que siga reproduciendo en background en móviles
-      (audioElement as any).mozAudioChannelType = "content";
-
       if (objectUrlRef.current) {
         URL.revokeObjectURL(objectUrlRef.current);
         objectUrlRef.current = null;
       }
-
-      const previousAudioUrl = audioElement.src;
-      if (typeof file === "string") {
-        audioElement.src = "";
-        audioElement.src = file;
-      } else {
-        const objectUrl = URL.createObjectURL(file);
-        objectUrlRef.current = objectUrl;
-        audioElement.src = "";
-        audioElement.src = objectUrl;
+      if (pendingObjectUrl) {
+        objectUrlRef.current = pendingObjectUrl;
+        pendingObjectUrl = null;
       }
+
+      audioElementRef.current = audioElement;
       console.log("[AudioResolve]", {
+        requestId: requestGuard?.requestId,
         previousAudioUrl,
         newAudioUrl: audioElement.src,
         audioElementSrc: audioElement.src,
       });
+
+      if (cancelIfStale(audioElement, pendingObjectUrl)) return false;
       audioElement.load();
+      if (cancelIfStale(audioElement, pendingObjectUrl)) return false;
 
       try {
+        if (cancelIfStale(audioElement, pendingObjectUrl)) return false;
         const sourceNode = ctx.createMediaElementSource(audioElement);
+        if (cancelIfStale(audioElement, pendingObjectUrl)) {
+          sourceNode.disconnect();
+          return false;
+        }
         sourceNodeRef.current = sourceNode;
         // La conexión se hará dinámicamente según el estado de los efectos
         updateAudioRouting();
@@ -887,6 +957,8 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
         console.error("Error creating MediaElementAudioSourceNode:", error);
         throw error;
       }
+
+      if (cancelIfStale(audioElement, pendingObjectUrl)) return false;
 
       // Guardar parámetros iniciales ya normalizados a los topes reales de UI.
       const clampedParams = clampStreamingParams(params);
@@ -914,6 +986,7 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
       setDuration(0);
 
       const onLoadedMetadata = () => {
+        if (audioElementRef.current !== audioElement || !isCurrentRequest()) return;
         setDuration(audioElement.duration);
         setIsReady(true);
         pendingCrossfadeInRef.current = crossfadeConfigRef.current.enabled;
@@ -930,6 +1003,7 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
       };
 
       const onTimeUpdate = () => {
+        if (audioElementRef.current !== audioElement || !isCurrentRequest()) return;
         setCurrentTime(audioElement.currentTime);
 
         // Verificar si debemos iniciar crossfade
@@ -945,6 +1019,7 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
       };
 
       const onEnded = () => {
+        if (audioElementRef.current !== audioElement || !isCurrentRequest()) return;
         setIsPlaying(false);
 
         // Si NO estamos en crossfade, llamar al callback para siguiente canción
@@ -961,6 +1036,7 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
       };
 
       const onError = () => {
+        if (audioElementRef.current !== audioElement || !isCurrentRequest()) return;
         const mediaError = audioElement.error;
         const message = mediaError
           ? `Audio playback error (code ${mediaError.code})`
@@ -972,15 +1048,16 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
         }
       };
 
+      if (cancelIfStale(audioElement, pendingObjectUrl)) return false;
       audioElement.addEventListener("loadedmetadata", onLoadedMetadata);
       audioElement.addEventListener("timeupdate", onTimeUpdate);
       audioElement.addEventListener("ended", onEnded);
       audioElement.addEventListener("error", onError);
+      return true;
     },
     [
       initAudioChain,
       epicenterEnabled,
-      startCrossfadeIn,
       startCrossfadeOut,
       updateAudioRouting,
     ],
