@@ -167,6 +167,8 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    // Android WebView 81 rejects newer syntax such as logical assignment operators.
+    target: "es2020",
     chunkSizeWarningLimit: 900,
   },
   server: {

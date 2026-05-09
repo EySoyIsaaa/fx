@@ -297,13 +297,23 @@ export const DEFAULT_EQ_BANDS: EqualizerBand[] = EQ_31_FREQUENCIES.map(
   }),
 );
 
+export interface LoadFileRequestGuard {
+  requestId?: number;
+  isCurrentRequest?: () => boolean;
+}
+
 export interface IntegratedAudioController {
   isReady: boolean;
   isPlaying: boolean;
   currentTime: number;
   duration: number;
-  loadFile: (file: File | string, dspParams: StreamingParams) => Promise<void>;
-  play: () => void;
+  loadFile: (
+    file: File | string,
+    dspParams: StreamingParams,
+    requestGuard?: LoadFileRequestGuard,
+  ) => Promise<boolean>;
+  play: () => boolean;
+  getActiveSource: () => string;
   pause: () => void;
   seek: (time: number) => void;
   setDspParam: (name: keyof StreamingParams, value: number) => void;
@@ -332,6 +342,7 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
   const audioContextRef = useRef<AudioContext | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const activeLoadRequestIdRef = useRef<number | undefined>(undefined);
   const analyserNodeRef = useRef<AnalyserNode | null>(null);
   const eqFiltersRef = useRef<BiquadFilterNode[]>([]);
   const eqLowFiltersRef = useRef<BiquadFilterNode[]>([]);
@@ -824,8 +835,131 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
     }
   }, []);
 
+  const waitForAudioReady = useCallback(
+    (
+      audioElement: HTMLAudioElement,
+      timeoutMs: number,
+      isCurrentRequest: () => boolean,
+      requestId?: number,
+      loadStartMs = performance.now(),
+    ): Promise<{ ready: boolean; event: string }> =>
+      new Promise((resolve) => {
+        let settled = false;
+        let intervalId: number | null = null;
+        const cleanup = () => {
+          audioElement.removeEventListener("loadedmetadata", onReady);
+          audioElement.removeEventListener("canplay", onReady);
+          audioElement.removeEventListener("error", onError);
+          if (intervalId !== null) window.clearInterval(intervalId);
+          window.clearTimeout(timeoutId);
+        };
+        const finish = (ready: boolean, event: string) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          console.info("[LOAD_FILE_READY]", {
+            requestId,
+            ready,
+            event,
+            loadDurationMs: performance.now() - loadStartMs,
+            activeSrc: audioElement.currentSrc || audioElement.src,
+          });
+          resolve({ ready, event });
+        };
+        const onReady = (event: Event) => {
+          finish(true, event.type);
+        };
+        const onError = () => {
+          finish(false, "error");
+        };
+        const timeoutId = window.setTimeout(() => {
+          finish(false, "timeout");
+        }, timeoutMs);
+
+        audioElement.addEventListener("loadedmetadata", onReady, { once: true });
+        audioElement.addEventListener("canplay", onReady, { once: true });
+        audioElement.addEventListener("error", onError, { once: true });
+        intervalId = window.setInterval(() => {
+          if (!isCurrentRequest()) {
+            finish(false, "cancelled");
+          }
+        }, 100);
+
+        if (audioElement.readyState >= HTMLMediaElement.HAVE_METADATA) {
+          finish(true, "readyState");
+        } else if (!isCurrentRequest()) {
+          finish(false, "cancelled");
+        }
+      }),
+    [],
+  );
+
   const loadFile = useCallback(
-    async (file: File | string, params: StreamingParams) => {
+    async (
+      file: File | string,
+      params: StreamingParams,
+      requestGuard?: LoadFileRequestGuard,
+    ): Promise<boolean> => {
+      const requestId = requestGuard?.requestId;
+      const isCurrentRequest = () => requestGuard?.isCurrentRequest?.() ?? true;
+      const cleanupAudioElement = (audioElement?: HTMLAudioElement | null) => {
+        if (!audioElement) return;
+        try {
+          audioElement.pause();
+          audioElement.removeAttribute("src");
+          audioElement.src = "";
+          audioElement.load();
+        } catch (error) {
+          console.warn("[AudioResolve] Error cleaning audio element", error);
+        }
+      };
+      const cleanupPendingAudio = (
+        audioElement?: HTMLAudioElement | null,
+        objectUrl?: string | null,
+        sourceNode?: MediaElementAudioSourceNode | null,
+      ) => {
+        if (sourceNode) {
+          try {
+            sourceNode.disconnect();
+          } catch (_error) {
+            // no-op: node may already be disconnected
+          }
+        }
+        cleanupAudioElement(audioElement);
+        if (objectUrl) {
+          URL.revokeObjectURL(objectUrl);
+        }
+      };
+      const cancelIfStale = (
+        audioElement?: HTMLAudioElement | null,
+        objectUrl?: string | null,
+        sourceNode?: MediaElementAudioSourceNode | null,
+      ) => {
+        if (isCurrentRequest()) {
+          return false;
+        }
+        cleanupPendingAudio(audioElement, objectUrl, sourceNode);
+        if (audioElement && audioElementRef.current === audioElement) {
+          if (sourceNodeRef.current) {
+            try {
+              sourceNodeRef.current.disconnect();
+            } catch (_error) {
+              // no-op
+            }
+            sourceNodeRef.current = null;
+          }
+          if (objectUrlRef.current) {
+            URL.revokeObjectURL(objectUrlRef.current);
+            objectUrlRef.current = null;
+          }
+          audioElementRef.current = null;
+          activeLoadRequestIdRef.current = undefined;
+        }
+        return true;
+      };
+
+      if (cancelIfStale()) return false;
+
       // Limpiar cualquier crossfade pendiente
       if (crossfadeTimeoutRef.current) {
         clearTimeout(crossfadeTimeoutRef.current);
@@ -834,59 +968,160 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
       isCrossfadingRef.current = false;
 
       await initAudioChain();
+      if (cancelIfStale()) return false;
       const ctx = audioContextRef.current!;
 
-      if (audioElementRef.current) {
-        audioElementRef.current.pause();
-        audioElementRef.current.currentTime = 0;
+      const oldAudioElement = audioElementRef.current;
+      const oldSourceNode = sourceNodeRef.current;
+      const oldSrc = oldAudioElement?.currentSrc || oldAudioElement?.src || "";
+      const hadOldAudio = !!oldAudioElement;
+      const hadOldSourceNode = !!oldSourceNode;
+      const newSourcePreview = typeof file === "string" ? file : file.name;
+
+      console.info("[LOAD_FILE_SWAP]", {
+        requestId,
+        oldSrc,
+        newSource: newSourcePreview,
+        hadOldAudio,
+        hadOldSourceNode,
+      });
+
+      if (cancelIfStale()) return false;
+
+      if (oldSourceNode) {
+        try {
+          oldSourceNode.disconnect();
+        } catch (_error) {
+          // no-op: node may already be disconnected
+        }
+        if (sourceNodeRef.current === oldSourceNode) {
+          sourceNodeRef.current = null;
+        }
       }
 
-      if (sourceNodeRef.current) {
-        sourceNodeRef.current.disconnect();
-        sourceNodeRef.current = null;
+      if (oldAudioElement) {
+        cleanupAudioElement(oldAudioElement);
+        if (audioElementRef.current === oldAudioElement) {
+          audioElementRef.current = null;
+        }
       }
-
-      const audioElement = new Audio();
-      audioElementRef.current = audioElement;
-
-      // Configuración para reproducción en background
-      audioElement.preload = "auto";
-      audioElement.crossOrigin = "anonymous";
-
-      // Importante para que siga reproduciendo en background en móviles
-      (audioElement as any).mozAudioChannelType = "content";
 
       if (objectUrlRef.current) {
         URL.revokeObjectURL(objectUrlRef.current);
         objectUrlRef.current = null;
       }
+      activeLoadRequestIdRef.current = undefined;
 
-      const previousAudioUrl = audioElement.src;
+      if (cancelIfStale()) return false;
+
+      const audioElement = new Audio();
+      const loadStartMs = performance.now();
+      let pendingObjectUrl: string | null = null;
+      let newSource = newSourcePreview;
+
+      // Configuración para reproducción en background
+      audioElement.crossOrigin = "anonymous";
+      audioElement.preload = "auto";
+
+      // Importante para que siga reproduciendo en background en móviles
+      (audioElement as any).mozAudioChannelType = "content";
+
+      if (cancelIfStale(audioElement, pendingObjectUrl)) return false;
+
       if (typeof file === "string") {
-        audioElement.src = "";
-        audioElement.src = file;
+        newSource = file;
       } else {
-        const objectUrl = URL.createObjectURL(file);
-        objectUrlRef.current = objectUrl;
-        audioElement.src = "";
-        audioElement.src = objectUrl;
+        pendingObjectUrl = URL.createObjectURL(file);
+        newSource = pendingObjectUrl;
       }
-      console.log("[AudioResolve]", {
-        previousAudioUrl,
-        newAudioUrl: audioElement.src,
-        audioElementSrc: audioElement.src,
-      });
-      audioElement.load();
 
+      setIsReady(false);
+      setCurrentTime(0);
+      setDuration(0);
+
+      if (cancelIfStale(audioElement, pendingObjectUrl)) return false;
+      audioElement.src = newSource;
+      if (cancelIfStale(audioElement, pendingObjectUrl)) return false;
       try {
-        const sourceNode = ctx.createMediaElementSource(audioElement);
-        sourceNodeRef.current = sourceNode;
-        // La conexión se hará dinámicamente según el estado de los efectos
-        updateAudioRouting();
+        audioElement.load();
       } catch (error) {
+        console.warn("[AudioResolve] audioElement.load failed", error);
+        cleanupPendingAudio(audioElement, pendingObjectUrl);
+        return false;
+      }
+      const readyResult = await waitForAudioReady(
+        audioElement,
+        12000,
+        isCurrentRequest,
+        requestId,
+        loadStartMs,
+      );
+      if (!readyResult.ready || cancelIfStale(audioElement, pendingObjectUrl)) {
+        cleanupPendingAudio(audioElement, pendingObjectUrl);
+        return false;
+      }
+
+      let sourceNode: MediaElementAudioSourceNode | null = null;
+      try {
+        sourceNode = ctx.createMediaElementSource(audioElement);
+      } catch (error) {
+        cleanupPendingAudio(audioElement, pendingObjectUrl, sourceNode);
         console.error("Error creating MediaElementAudioSourceNode:", error);
         throw error;
       }
+
+      if (cancelIfStale(audioElement, pendingObjectUrl, sourceNode)) return false;
+
+      sourceNodeRef.current = sourceNode;
+      audioElementRef.current = audioElement;
+      activeLoadRequestIdRef.current = requestId;
+      if (pendingObjectUrl) {
+        objectUrlRef.current = pendingObjectUrl;
+        pendingObjectUrl = null;
+      }
+
+      console.info("[LOAD_FILE_ACTIVE]", {
+        requestId,
+        activeSrc: audioElement.currentSrc || audioElement.src,
+        sourceNodeSet: !!sourceNodeRef.current,
+      });
+      console.log("[AudioResolve]", {
+        requestId,
+        previousAudioUrl: oldSrc,
+        newAudioUrl: audioElement.src,
+        audioElementSrc: audioElement.src,
+      });
+      setDuration(audioElement.duration || 0);
+      setIsReady(true);
+      pendingCrossfadeInRef.current = crossfadeConfigRef.current.enabled;
+      if (
+        !crossfadeConfigRef.current.enabled &&
+        masterGainRef.current &&
+        audioContextRef.current
+      ) {
+        masterGainRef.current.gain.setValueAtTime(
+          1.0,
+          audioContextRef.current.currentTime,
+        );
+      }
+
+      // La conexión se hará dinámicamente según el estado de los efectos
+      try {
+        updateAudioRouting();
+      } catch (error) {
+        console.error("[PLAYBACK_ERROR] updateAudioRouting failed", {
+          requestId,
+          error,
+          activeSrc: audioElement.currentSrc || audioElement.src,
+          requestedTrackId: requestId,
+        });
+        cleanupPendingAudio(audioElement, pendingObjectUrl, sourceNode);
+        if (sourceNodeRef.current === sourceNode) sourceNodeRef.current = null;
+        if (audioElementRef.current === audioElement) audioElementRef.current = null;
+        return false;
+      }
+
+      if (cancelIfStale(audioElement, pendingObjectUrl, sourceNode)) return false;
 
       // Guardar parámetros iniciales ya normalizados a los topes reales de UI.
       const clampedParams = clampStreamingParams(params);
@@ -909,11 +1144,8 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
         }
       }
 
-      setIsReady(false);
-      setCurrentTime(0);
-      setDuration(0);
-
       const onLoadedMetadata = () => {
+        if (audioElementRef.current !== audioElement || !isCurrentRequest()) return;
         setDuration(audioElement.duration);
         setIsReady(true);
         pendingCrossfadeInRef.current = crossfadeConfigRef.current.enabled;
@@ -930,6 +1162,7 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
       };
 
       const onTimeUpdate = () => {
+        if (audioElementRef.current !== audioElement || !isCurrentRequest()) return;
         setCurrentTime(audioElement.currentTime);
 
         // Verificar si debemos iniciar crossfade
@@ -945,6 +1178,7 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
       };
 
       const onEnded = () => {
+        if (audioElementRef.current !== audioElement || !isCurrentRequest()) return;
         setIsPlaying(false);
 
         // Si NO estamos en crossfade, llamar al callback para siguiente canción
@@ -961,6 +1195,7 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
       };
 
       const onError = () => {
+        if (audioElementRef.current !== audioElement || !isCurrentRequest()) return;
         const mediaError = audioElement.error;
         const message = mediaError
           ? `Audio playback error (code ${mediaError.code})`
@@ -972,27 +1207,41 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
         }
       };
 
+      if (cancelIfStale(audioElement, pendingObjectUrl, sourceNode)) return false;
       audioElement.addEventListener("loadedmetadata", onLoadedMetadata);
       audioElement.addEventListener("timeupdate", onTimeUpdate);
       audioElement.addEventListener("ended", onEnded);
       audioElement.addEventListener("error", onError);
+      return true;
     },
     [
       initAudioChain,
       epicenterEnabled,
-      startCrossfadeIn,
       startCrossfadeOut,
       updateAudioRouting,
+      waitForAudioReady,
     ],
   );
 
-  const play = useCallback(() => {
-    if (!audioElementRef.current || !audioContextRef.current) return;
+  const play = useCallback((): boolean => {
+    if (!audioElementRef.current || !audioContextRef.current) return false;
     const element = audioElementRef.current;
+    console.info("[AUDIO_PLAY_CALL]", {
+      requestId: activeLoadRequestIdRef.current,
+      playingSrc: element.currentSrc || element.src,
+    });
+    if (audioContextRef.current.state === "closed") return false;
     if (audioContextRef.current.state === "suspended") {
-      audioContextRef.current.resume();
+      void audioContextRef.current.resume().catch((error) => {
+        console.warn("[AUDIO_PLAY_CALL] audioContext resume failed", error);
+      });
     }
     void element.play().catch((error) => {
+      console.error("[PLAYBACK_ERROR] audioElement.play failed", {
+        requestId: activeLoadRequestIdRef.current,
+        error,
+        activeSrc: element.currentSrc || element.src,
+      });
       setIsPlaying(false);
       if (onTrackErrorRef.current) {
         onTrackErrorRef.current(
@@ -1005,6 +1254,7 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
       pendingCrossfadeInRef.current = false;
     }
     setIsPlaying(true);
+    return true;
   }, [startCrossfadeIn]);
 
   const pause = useCallback(() => {
@@ -1274,6 +1524,11 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
     setDuration(0);
   }, []);
 
+  const getActiveSource = useCallback(
+    () => audioElementRef.current?.currentSrc || audioElementRef.current?.src || "",
+    [],
+  );
+
   return {
     isReady,
     isPlaying,
@@ -1281,6 +1536,7 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
     duration,
     loadFile,
     play,
+    getActiveSource,
     pause,
     seek,
     setDspParam,
