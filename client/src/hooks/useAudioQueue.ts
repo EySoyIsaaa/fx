@@ -17,6 +17,23 @@ import type { AndroidMusicFile } from '@/hooks/useAndroidMusicLibrary';
 import { isHiResQuality } from '@shared/audioQuality';
 import { logger } from "@/lib/logger";
 
+
+const getNativeAlbumArt = async (albumArtUri?: string): Promise<string | null> => {
+  if (!albumArtUri || typeof window === 'undefined') return null;
+  const MusicScanner = (window as any).Capacitor?.Plugins?.MusicScanner;
+  if (!MusicScanner?.getAlbumArt) return null;
+
+  try {
+    const result = await MusicScanner.getAlbumArt({ albumArtUri });
+    return typeof result?.dataUrl === 'string' && result.dataUrl.length > 0
+      ? result.dataUrl
+      : null;
+  } catch (error) {
+    logger.warn('[Library] Could not restore native album art:', error);
+    return null;
+  }
+};
+
 export interface Track {
   id: string;
   sourceTrackId?: string; // ID real en biblioteca cuando la cola usa IDs temporales
@@ -129,6 +146,7 @@ export function useAudioQueue(): QueueController {
         if (isAndroid) {
           let page = 1;
           let total = 0;
+          const albumArtCache = new Map<string, string | null>();
           do {
             const batch = await musicLibraryDB.getTrackMetadataPage({
               page,
@@ -138,51 +156,67 @@ export function useAudioQueue(): QueueController {
               sortDir: 'desc',
             });
             total = batch.total;
+            const shouldRestoreNativeAlbumArt = total <= 500;
             logger.debug(`[Library] Native page ${page}: ${batch.records.length}/${total}`);
             for (const metadata of batch.records) {
-          try {
-            const file = undefined;
+              try {
+                const file = undefined;
 
-            // Reconstruir URL de carátula si existe
-            let coverUrl: string | undefined;
-            if (metadata.coverBase64) {
-              coverUrl = metadata.coverBase64;
-              coverUrlsRef.current.set(metadata.id, coverUrl);
+                // Reconstruir la carátula nativa en cada arranque: la DB nativa
+                // guarda albumArtUri/albumId, pero no el data URL mostrado al importar.
+                let coverUrl: string | undefined;
+                if (metadata.coverBase64) {
+                  coverUrl = metadata.coverBase64;
+                } else if (metadata.albumArtUri) {
+                  if (shouldRestoreNativeAlbumArt) {
+                    if (!albumArtCache.has(metadata.albumArtUri)) {
+                      albumArtCache.set(
+                        metadata.albumArtUri,
+                        await getNativeAlbumArt(metadata.albumArtUri),
+                      );
+                    }
+                    coverUrl = albumArtCache.get(metadata.albumArtUri) || metadata.albumArtUri;
+                  } else {
+                    coverUrl = metadata.albumArtUri;
+                  }
+                }
+                if (coverUrl) {
+                  coverUrlsRef.current.set(metadata.id, coverUrl);
+                }
+
+                tracks.push({
+                  id: metadata.id,
+                  file,
+                  fileName: metadata.fileName,
+                  fileType: metadata.fileType,
+                  fileSize: metadata.fileSize,
+                  title: metadata.title,
+                  artist: metadata.artist,
+                  duration: metadata.duration,
+                  coverUrl,
+                  bitDepth: metadata.bitDepth,
+                  sampleRate: metadata.sampleRate,
+                  bitrate: metadata.bitrate,
+                  isHiRes: metadata.isHiRes,
+                  sourceUri: metadata.sourceUri,
+                  sourceType: metadata.sourceType,
+                  albumId: metadata.albumId,
+                  albumArtUri: metadata.albumArtUri,
+                  mediaStoreId: metadata.mediaStoreId,
+                  dateModified: metadata.dateModified,
+                  sourceVersionKey: metadata.sourceVersionKey,
+                  unavailable: metadata.unavailable,
+                  unavailableReason: (metadata as any).unavailableReason,
+                  lastSeenAt: (metadata as any).lastSeenAt,
+                  missingSince: (metadata as any).missingSince,
+                  missingCount: (metadata as any).missingCount,
+                  scanCompleteness: (metadata as any).scanCompleteness,
+                  lastValidatedAt: metadata.lastValidatedAt,
+                });
+              } catch (error) {
+                logger.error(`[Library] Error loading track ${metadata.id}:`, error);
+              }
             }
-
-            tracks.push({
-              id: metadata.id,
-              file,
-              fileName: metadata.fileName,
-              fileType: metadata.fileType,
-              fileSize: metadata.fileSize,
-              title: metadata.title,
-              artist: metadata.artist,
-              duration: metadata.duration,
-              coverUrl,
-              bitDepth: metadata.bitDepth,
-              sampleRate: metadata.sampleRate,
-              bitrate: metadata.bitrate,
-              isHiRes: metadata.isHiRes,
-              sourceUri: metadata.sourceUri,
-              sourceType: metadata.sourceType,
-              albumId: metadata.albumId,
-              albumArtUri: metadata.albumArtUri,
-              mediaStoreId: metadata.mediaStoreId,
-              dateModified: metadata.dateModified,
-              sourceVersionKey: metadata.sourceVersionKey,
-              unavailable: metadata.unavailable,
-              unavailableReason: (metadata as any).unavailableReason,
-              lastSeenAt: (metadata as any).lastSeenAt,
-              missingSince: (metadata as any).missingSince,
-              missingCount: (metadata as any).missingCount,
-              scanCompleteness: (metadata as any).scanCompleteness,
-              lastValidatedAt: metadata.lastValidatedAt,
-            });
-          } catch (error) {
-            logger.error(`[Library] Error loading track ${metadata.id}:`, error);
-          }
-        }
             page += 1;
           } while ((page - 1) * 100 < total);
         } else {

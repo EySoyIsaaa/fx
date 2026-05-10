@@ -13,6 +13,21 @@ export interface Preset {
   gainsDb: number[];
 }
 
+const AUTO_EQ_LOW_BAND_LIMIT_HZ = 120;
+const AUTO_EQ_LOW_BAND_MAX_DB = 2.5;
+
+const capAutoPresetLowBands = (gainsDb: number[]) =>
+  gainsDb.map((gain, index) =>
+    FREQUENCY_BANDS_31[index] < AUTO_EQ_LOW_BAND_LIMIT_HZ
+      ? Math.min(gain, AUTO_EQ_LOW_BAND_MAX_DB)
+      : gain,
+  );
+
+const withCappedAutoLowBands = (preset: Preset): Preset => ({
+  ...preset,
+  gainsDb: capAutoPresetLowBands(preset.gainsDb),
+});
+
 const validatePreset = (preset: Preset) => {
   if (preset.gainsDb.length !== FREQUENCY_BANDS_31.length) {
     throw new Error(`Preset ${preset.id} must have ${FREQUENCY_BANDS_31.length} bands.`);
@@ -29,7 +44,7 @@ export const PRESETS_31BAND: Preset[] = [
   { id: 'BANDA_REGIONAL', name: 'Banda Regional', preampDb: -5, gainsDb: [1,1,1,2,3,3,2,1,1,0,0,0,0,0,0,0,1,1,1,1,1,0,-1,-2,-2,-2,-2,-1,0,0,0] },
   { id: 'ELECTRONICA', name: 'Electrónica', preampDb: -6, gainsDb: [2,2,3,4,5,5,4,3,2,1,0,0,0,0,0,0,0,0,0,0,0,1,1,1,2,2,2,2,1,0,0] },
   { id: 'LOUDNESS', name: 'Loudness', preampDb: -5, gainsDb: [2,2,2,2,2,2,2,2,1,0,0,0,0,0,0,0,0,0,1,1,1,1,1,0,0,0,1,1,1,0,0] },
-];
+].map(withCappedAutoLowBands);
 
 PRESETS_31BAND.forEach(validatePreset);
 
@@ -198,16 +213,17 @@ export async function applyPresetSmooth({
     throw new Error('Target preset must contain 31 gains.');
   }
 
+  const cappedTargetGains = capAutoPresetLowBands(targetGains);
   const gains = [...currentGains];
-  while (gains.length < targetGains.length) gains.push(0);
+  while (gains.length < cappedTargetGains.length) gains.push(0);
 
   const steps = Math.max(1, Math.ceil(durationMs / stepMs));
 
   for (let step = 0; step < steps; step++) {
     let pending = false;
 
-    for (let i = 0; i < targetGains.length; i++) {
-      const diff = targetGains[i] - gains[i];
+    for (let i = 0; i < cappedTargetGains.length; i++) {
+      const diff = cappedTargetGains[i] - gains[i];
       if (Math.abs(diff) < 0.001) continue;
 
       pending = true;
@@ -220,8 +236,8 @@ export async function applyPresetSmooth({
     await new Promise((resolve) => setTimeout(resolve, stepMs));
   }
 
-  for (let i = 0; i < targetGains.length; i++) {
-    setEqBandGain(i, targetGains[i]);
+  for (let i = 0; i < cappedTargetGains.length; i++) {
+    setEqBandGain(i, cappedTargetGains[i]);
   }
 }
 

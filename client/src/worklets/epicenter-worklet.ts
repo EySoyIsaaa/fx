@@ -27,7 +27,7 @@ declare var registerProcessor: (name: string, processorCtor: any) => void;
 const DENORMAL_FLOOR = 1e-24;
 const TWO_PI = Math.PI * 2;
 const EPICENTER_INTENSITY_HEADROOM = 0.75;
-const EPICENTER_INTENSITY_MAX_SCALE = 0.5;
+const EPICENTER_INTENSITY_MAX_SCALE = 0.65;
 const EPICENTER_VOLUME_MAX_SCALE = 0.75;
 const EPICENTER_OUTPUT_TRIM = 0.95;
 
