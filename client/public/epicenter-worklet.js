@@ -8,7 +8,7 @@
   var DENORMAL_FLOOR = 1e-24;
   var TWO_PI = Math.PI * 2;
   var EPICENTER_INTENSITY_HEADROOM = 0.75;
-  var EPICENTER_INTENSITY_MAX_SCALE = 0.5;
+  var EPICENTER_INTENSITY_MAX_SCALE = 0.65;
   var EPICENTER_VOLUME_MAX_SCALE = 0.75;
   var EPICENTER_OUTPUT_TRIM = 0.95;
   var BiquadFilter = class {
@@ -95,6 +95,59 @@
       this.y2 = 0;
     }
   };
+  var LowShelfFilter = class {
+    constructor(sr) {
+      this.sr = sr;
+      __publicField(this, "b0", 1);
+      __publicField(this, "b1", 0);
+      __publicField(this, "b2", 0);
+      __publicField(this, "a1", 0);
+      __publicField(this, "a2", 0);
+      __publicField(this, "z1", 0);
+      __publicField(this, "z2", 0);
+      __publicField(this, "freqHz", -1);
+      __publicField(this, "gainDb", -999);
+      __publicField(this, "Q", 0.707);
+    }
+    update(freqHz, gainDb) {
+      const clampedFreq = Math.max(20, Math.min(freqHz, this.sr * 0.45));
+      const clampedGain = Math.max(0, Math.min(10.5, gainDb));
+      if (Math.abs(clampedFreq - this.freqHz) < 1e-3 && Math.abs(clampedGain - this.gainDb) < 1e-3) {
+        return;
+      }
+      this.freqHz = clampedFreq;
+      this.gainDb = clampedGain;
+      const A = Math.pow(10, clampedGain / 40);
+      const w0 = TWO_PI * clampedFreq / this.sr;
+      const cosW0 = Math.cos(w0);
+      const sinW0 = Math.sin(w0);
+      const alpha = sinW0 / (2 * this.Q);
+      const sqrtA = Math.sqrt(A);
+      let b0 = A * (A + 1 - (A - 1) * cosW0 + 2 * sqrtA * alpha);
+      let b1 = 2 * A * (A - 1 - (A + 1) * cosW0);
+      let b2 = A * (A + 1 - (A - 1) * cosW0 - 2 * sqrtA * alpha);
+      const a0 = A + 1 + (A - 1) * cosW0 + 2 * sqrtA * alpha;
+      let a1 = -2 * (A - 1 + (A + 1) * cosW0);
+      let a2 = A + 1 + (A - 1) * cosW0 - 2 * sqrtA * alpha;
+      b0 /= a0;
+      b1 /= a0;
+      b2 /= a0;
+      a1 /= a0;
+      a2 /= a0;
+      this.b0 = b0;
+      this.b1 = b1;
+      this.b2 = b2;
+      this.a1 = a1;
+      this.a2 = a2;
+    }
+    process(sample) {
+      const input = Math.abs(sample) < DENORMAL_FLOOR ? 0 : sample;
+      const out = this.b0 * input + this.z1;
+      this.z1 = this.b1 * input - this.a1 * out + this.z2;
+      this.z2 = this.b2 * input - this.a2 * out;
+      return Math.abs(out) < DENORMAL_FLOOR ? 0 : out;
+    }
+  };
   var EnvelopeFollower = class {
     constructor(attackCoeff, releaseCoeff) {
       this.attackCoeff = attackCoeff;
@@ -124,7 +177,7 @@
         { name: "sweepFreq", defaultValue: 45, minValue: 27, maxValue: 63, automationRate: "k-rate" },
         { name: "width", defaultValue: 50, minValue: 0, maxValue: 100, automationRate: "k-rate" },
         { name: "intensity", defaultValue: 100, minValue: 0, maxValue: 100, automationRate: "k-rate" },
-        { name: "balance", defaultValue: 50, minValue: 0, maxValue: 100, automationRate: "k-rate" },
+        { name: "balance", defaultValue: 100, minValue: 0, maxValue: 100, automationRate: "k-rate" },
         { name: "volume", defaultValue: 100, minValue: 0, maxValue: 100, automationRate: "k-rate" }
       ];
     }
@@ -144,6 +197,7 @@
         lowMidBody: new BiquadFilter("bandpass", bodyHz, sampleRate, 0.85),
         lowMidDip: new BiquadFilter("bandpass", bodyHz * 1.18, sampleRate, 1.1),
         subLowpass: new BiquadFilter("lowpass", subTopHz, sampleRate, 0.707),
+        bassBoostShelf: new LowShelfFilter(sampleRate),
         outputDcHighpass: new BiquadFilter("highpass", 32, sampleRate, 0.707),
         voiceEnv: new EnvelopeFollower(this.coeffFromMs(6), this.coeffFromMs(110))
       };
@@ -177,8 +231,8 @@
       const crossoverHz = 105 + widthNorm * 30;
       const bodyHz = 95 + sweepNorm * 20;
       const subTopHz = 58 + widthNorm * 10;
-      const synthLowHz = 55 + widthNorm * 10;
-      const synthHighHz = 22 + sweepNorm * 6;
+      const synthLowHz = 48 + widthNorm * 8;
+      const synthHighHz = 16 + sweepNorm * 4;
       return {
         detector60,
         detector80,
@@ -259,8 +313,10 @@
       const balanceNorm = Math.max(0, Math.min(100, balance)) / 100;
       const widthNorm = Math.max(0, Math.min(100, width)) / 100;
       const volumeGain = Math.max(0, Math.min(1, volume / 100 * EPICENTER_VOLUME_MAX_SCALE));
-      const synthAmount = (0.39 + intensityNorm * 1.12) * 1.15;
-      const bassProgramAmount = 0.64 + balanceNorm * 0.32;
+      const bassBoostFreqHz = 48 + widthNorm * 8;
+      const bassBoostGainDb = intensityScaledNorm * 7.4;
+      const synthAmount = (0.42 + intensityNorm * 1.2) * 1.15;
+      const bassProgramAmount = 0.58 + balanceNorm * 0.26;
       const lowMidBodyAmount = 0.12 + balanceNorm * 0.08;
       const lowMidDipAmount = (0.08 + intensityNorm * 0.16) * (0.45 + widthNorm * 0.3);
       const gateHoldSamples = Math.floor(sampleRate * (0.025 + intensityNorm * 0.06));
@@ -298,6 +354,7 @@
         const inChan = input[ch];
         const outChan = output[ch];
         const state = this.channels[ch];
+        state.bassBoostShelf.update(bassBoostFreqHz, bassBoostGainDb);
         for (let i = 0; i < blockSize; i++) {
           const sample = this.denormalFloor(inChan[i]);
           const voicePath = state.voiceHighpass.process(sample);
@@ -308,8 +365,9 @@
           const body = state.lowMidBody.process(sample);
           const dip = state.lowMidDip.process(sample);
           const shapedBassProgram = bassProgram * bassProgramAmount + body * lowMidBodyAmount * (0.45 + voiceProtection * 0.55) - dip * lowMidDipAmount;
-          const generatedSub = state.subLowpass.process(subBuffer[i]) * (0.4 + voiceProtection * 0.6);
+          const generatedSub = state.subLowpass.process(subBuffer[i]) * (0.48 + voiceProtection * 0.62);
           let mixed = cleanVoicePath + shapedBassProgram + generatedSub;
+          mixed = state.bassBoostShelf.process(mixed);
           const protectionGain = 0.94 + voiceProtection * 0.06;
           mixed *= volumeGain * protectionGain * EPICENTER_OUTPUT_TRIM;
           mixed = Math.tanh(mixed * 0.9) / Math.tanh(0.9);
