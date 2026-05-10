@@ -55,6 +55,7 @@ import {
 import { useLanguage } from "@/hooks/useLanguage";
 import {
   useAndroidMusicLibrary,
+  type AndroidAudioFileUrlResult,
   type AndroidMusicFile,
 } from "@/hooks/useAndroidMusicLibrary";
 import { hiresAudioBadgeUrl, hiresLogoUrl } from "@/lib/assetUrls";
@@ -79,6 +80,11 @@ type HomeNavigationSnapshot = {
   duplicatesModalOpen: boolean;
 };
 
+type ResolvedTrackPlaybackSource = {
+  source: File | string;
+  resolveResult?: AndroidAudioFileUrlResult;
+};
+
 const HOME_NAVIGATION_STATE_KEY = "__epicenterHomeNav";
 
 const clampDspParam = (key: keyof StreamingParams, value: number): number => {
@@ -94,6 +100,9 @@ const clampDspParam = (key: keyof StreamingParams, value: number): number => {
       return value;
   }
 };
+
+const ANDROID_FAST_STREAMING_ENABLED = true;
+const ANDROID_PREFETCH_ENABLED = false;
 
 const clampDspParams = (params: StreamingParams): StreamingParams => ({
   sweepFreq: clampDspParam("sweepFreq", params.sweepFreq),
@@ -126,6 +135,9 @@ export default function Home() {
   );
   const [visibleSongsCount, setVisibleSongsCount] = useState(250);
   const [showQueue, setShowQueue] = useState(false);
+  const [pendingTrack, setPendingTrack] = useState<Track | null>(null);
+  const [nowPlayingTrack, setNowPlayingTrack] = useState<Track | null>(null);
+  const [activeAudioSource, setActiveAudioSource] = useState("");
   const [globalSearchQuery, setGlobalSearchQuery] = useState("");
   const [dspParams, setDspParams] = useState<StreamingParams>({
     sweepFreq: 45,
@@ -173,9 +185,12 @@ export default function Home() {
   const lastAutoPresetTrackRef = useRef<string | null>(null);
   const lastAutoPresetTimeRef = useRef(0);
   const trackLoadRequestRef = useRef(0);
+  const playbackReasonRef = useRef("queue-change");
+  const currentTrackIdRef = useRef<string | null>(null);
   const playTimeoutRef = useRef<number | null>(null);
   const autoOptimizationTimeoutRef = useRef<number | null>(null);
   const failedQueueTrackIdsRef = useRef<Set<string>>(new Set());
+  const nextPrefetchKeyRef = useRef<string | null>(null);
   const mediaStoreReconciledRef = useRef(false);
 
   const hiResTracks = useMemo(
@@ -290,8 +305,14 @@ export default function Home() {
     mediaSession.setHandlers({
       onPlay: () => audioProcessor.play(),
       onPause: () => audioProcessor.pause(),
-      onNextTrack: () => queue.nextTrack(),
-      onPreviousTrack: () => queue.previousTrack(),
+      onNextTrack: () => {
+        playbackReasonRef.current = "next";
+        queue.nextTrack();
+      },
+      onPreviousTrack: () => {
+        playbackReasonRef.current = "previous";
+        queue.previousTrack();
+      },
       onSeekTo: (time) => audioProcessor.seek(time),
       onSeekBackward: (offset) => {
         audioProcessor.seek(Math.max(0, audioProcessor.currentTime - offset));
@@ -309,29 +330,35 @@ export default function Home() {
     mediaNotification.setHandlers({
       onPlay: () => audioProcessor.play(),
       onPause: () => audioProcessor.pause(),
-      onNext: () => queue.nextTrack(),
-      onPrevious: () => queue.previousTrack(),
+      onNext: () => {
+        playbackReasonRef.current = "next";
+        queue.nextTrack();
+      },
+      onPrevious: () => {
+        playbackReasonRef.current = "previous";
+        queue.previousTrack();
+      },
       onSeek: (time) => audioProcessor.seek(time),
     });
   }, [audioProcessor, queue, mediaSession, mediaNotification]);
 
   // Actualizar metadatos en Media Session cuando cambia el track
   useEffect(() => {
-    if (queue.currentTrack) {
+    if (nowPlayingTrack) {
       mediaSession.updateMetadata({
-        title: queue.currentTrack.title,
-        artist: queue.currentTrack.artist,
-        artwork: queue.currentTrack.coverUrl,
+        title: nowPlayingTrack.title,
+        artist: nowPlayingTrack.artist,
+        artwork: nowPlayingTrack.coverUrl,
       });
 
       mediaNotification.updateMetadata({
-        title: queue.currentTrack.title,
-        artist: queue.currentTrack.artist,
+        title: nowPlayingTrack.title,
+        artist: nowPlayingTrack.artist,
         album: "Epicenter Hi-Fi",
-        artwork: queue.currentTrack.coverUrl,
+        artwork: nowPlayingTrack.coverUrl,
       });
     }
-  }, [queue.currentTrack, mediaSession, mediaNotification]);
+  }, [nowPlayingTrack, mediaSession, mediaNotification]);
 
   // Actualizar estado de reproducción
   useEffect(() => {
@@ -340,14 +367,14 @@ export default function Home() {
     );
     mediaNotification.updatePlaybackState(audioProcessor.isPlaying);
 
-    if (audioProcessor.isPlaying && queue.currentTrack) {
+    if (audioProcessor.isPlaying && nowPlayingTrack) {
       mediaNotification.start();
     }
   }, [
     audioProcessor.isPlaying,
     mediaSession,
     mediaNotification,
-    queue.currentTrack,
+    nowPlayingTrack,
   ]);
 
   // Actualizar posición
@@ -381,6 +408,11 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [dspParams, audioProcessor.eqBands]);
 
+
+  useEffect(() => {
+    currentTrackIdRef.current = queue.currentTrack?.id ?? null;
+  }, [queue.currentTrack?.id]);
+
   const clearPendingPlaybackTimers = useCallback(() => {
     if (playTimeoutRef.current !== null) {
       window.clearTimeout(playTimeoutRef.current);
@@ -393,38 +425,76 @@ export default function Home() {
   }, []);
 
   const resolveTrackSource = useCallback(
-    async (track: Track): Promise<File | string> => {
-      if (track.sourceType === "media-store" && track.sourceUri) {
+    async (
+      track: Track,
+      context?: { requestId?: number; reason?: string },
+    ): Promise<ResolvedTrackPlaybackSource> => {
+      if (track.sourceUri && track.sourceType !== "file") {
         if (track.unavailable) {
           throw new Error("Track source not available");
         }
 
+        const resolveStartMs = performance.now();
         const stableLibraryTrack =
+          queue.library.find((libraryTrack) => libraryTrack.id === track.id) ??
           (track.sourceTrackId
             ? queue.library.find(
                 (libraryTrack) => libraryTrack.id === track.sourceTrackId,
               )
             : null) ??
           queue.library.find(
-            (libraryTrack) =>
-              libraryTrack.sourceType === "media-store" &&
-              libraryTrack.sourceUri === track.sourceUri,
+            (libraryTrack) => libraryTrack.sourceUri === track.sourceUri,
           );
 
-        const fileUrl = await androidMusicLibrary.getAudioFileUrl(
+        const resolvedTrackId = stableLibraryTrack?.id ?? track.sourceTrackId ?? track.id;
+        const result = await androidMusicLibrary.getAudioFileUrlResult(
           track.sourceUri,
-          stableLibraryTrack?.id ?? track.sourceTrackId ?? track.id,
+          resolvedTrackId,
           {
-            expectedSize: stableLibraryTrack?.file?.size,
-            sourceVersionKey: stableLibraryTrack?.sourceVersionKey,
+            expectedSize: stableLibraryTrack?.fileSize ?? track.fileSize,
+            sourceVersionKey: stableLibraryTrack?.sourceVersionKey ?? track.sourceVersionKey,
+            allowStreaming: ANDROID_FAST_STREAMING_ENABLED,
           },
         );
+        const fileUrl = result?.url ?? null;
+        console.info("[RESOLVE_RESULT]", {
+          requestId: context?.requestId ?? trackLoadRequestRef.current,
+          reason: context?.reason,
+          source: fileUrl,
+          sourceType: track.sourceType,
+          streamUrlUsed: !!result?.streamUrl,
+          filePathUsed: !!result?.filePath || (!!fileUrl && !fileUrl.startsWith("http://127.0.0.1")),
+          cacheHit: result?.cacheHit ?? result?.cached ?? false,
+          copyTimeMs: result?.copyTimeMs ?? 0,
+          resolveDurationMs: result?.resolveDurationMs ?? performance.now() - resolveStartMs,
+        });
+        console.info("[LOAD_DEBUG_SOURCE]", {
+          requestedTrackId: track.id,
+          requestedTrackSourceTrackId: track.sourceTrackId,
+          requestedTrackTitle: track.title,
+          requestedTrackSourceType: track.sourceType,
+          requestedTrackSourceUri: track.sourceUri,
+          requestedTrackMediaStoreId: track.mediaStoreId,
+          requestedTrackFileSize: track.fileSize,
+          stableLibraryTrackId: stableLibraryTrack?.id,
+          resolvedTrackId,
+          sourceFinal: fileUrl,
+        });
+        const resolveEndMs = performance.now();
+        console.info("[PlaybackLatency] resolveTrackSource", {
+          trackId: track.id,
+          sourceTrackId: track.sourceTrackId,
+          sourceUri: track.sourceUri,
+          resolveStartMs,
+          resolveEndMs,
+          resolveDurationMs: resolveEndMs - resolveStartMs,
+        });
 
         if (!fileUrl) {
           throw new Error("No se pudo obtener el audio del dispositivo");
         }
 
-        return fileUrl;
+        return { source: fileUrl, resolveResult: result ?? undefined };
       }
 
       const trackFile = track.file ?? (await queue.getTrackFile(track));
@@ -432,10 +502,48 @@ export default function Home() {
         throw new Error("Track source not available");
       }
 
-      return trackFile;
+      return { source: trackFile };
     },
     [androidMusicLibrary, queue.getTrackFile, queue.library],
   );
+
+
+  useEffect(() => {
+    if (!ANDROID_PREFETCH_ENABLED) return;
+    const nextTrack = queue.queue[queue.currentTrackIndex + 1];
+    if (!nextTrack || !nextTrack.sourceUri || nextTrack.sourceType === "file") {
+      return;
+    }
+
+    const prefetchKey = `${nextTrack.sourceTrackId ?? nextTrack.id}:${nextTrack.sourceUri}:${nextTrack.sourceVersionKey ?? ""}`;
+    if (nextPrefetchKeyRef.current === prefetchKey) {
+      return;
+    }
+    nextPrefetchKeyRef.current = prefetchKey;
+
+    const stableLibraryTrack =
+      queue.library.find((libraryTrack) => libraryTrack.id === nextTrack.id) ??
+      (nextTrack.sourceTrackId
+        ? queue.library.find((libraryTrack) => libraryTrack.id === nextTrack.sourceTrackId)
+        : undefined) ??
+      queue.library.find(
+        (libraryTrack) => libraryTrack.sourceUri === nextTrack.sourceUri,
+      );
+
+    void androidMusicLibrary.prepareAudioFileUrl?.(
+      nextTrack.sourceUri,
+      stableLibraryTrack?.id ?? nextTrack.sourceTrackId ?? nextTrack.id,
+      {
+        expectedSize: stableLibraryTrack?.fileSize ?? nextTrack.fileSize,
+        sourceVersionKey: stableLibraryTrack?.sourceVersionKey ?? nextTrack.sourceVersionKey,
+      },
+    );
+  }, [
+    androidMusicLibrary,
+    queue.currentTrackIndex,
+    queue.library,
+    queue.queue,
+  ]);
 
   const playNextAvailableTrackAfterFailure = useCallback(
     (failedQueueTrackId: string) => {
@@ -456,6 +564,7 @@ export default function Home() {
           continue;
         }
 
+        playbackReasonRef.current = "failure-skip";
         queue.playTrack(candidateIndex);
         return true;
       }
@@ -472,6 +581,7 @@ export default function Home() {
         queue.queue.length > 0 &&
         queue.currentTrackIndex < queue.queue.length - 1
       ) {
+        playbackReasonRef.current = "autoplay";
         queue.nextTrack();
       }
     });
@@ -583,15 +693,21 @@ export default function Home() {
         queue.playTrack(0);
 
         try {
-          const source = await resolveTrackSource(track);
+          const { source } = await resolveTrackSource(track, {
+            requestId,
+            reason: "restore_last_track",
+          });
 
           if (trackLoadRequestRef.current !== requestId) {
             return;
           }
 
-          await audioProcessor.loadFile(source, dspParams);
+          const loaded = await audioProcessor.loadFile(source, dspParams, {
+            requestId,
+            isCurrentRequest: () => trackLoadRequestRef.current === requestId,
+          });
 
-          if (trackLoadRequestRef.current !== requestId) {
+          if (!loaded || trackLoadRequestRef.current !== requestId) {
             return;
           }
         } catch (error) {
@@ -617,6 +733,171 @@ export default function Home() {
     resolveTrackSource,
   ]);
 
+  const requestTrackPlayback = useCallback(
+    (requestedTrack: Track, reason: string) => {
+      if (!requestedTrack) return;
+
+      const requestId = ++trackLoadRequestRef.current;
+      clearPendingPlaybackTimers();
+      currentTrackRef.current = requestedTrack.id;
+      setPendingTrack(requestedTrack);
+      console.info("[PLAYBACK_REQUEST]", {
+        reason,
+        requestId,
+        requestedTrackId: requestedTrack.id,
+        title: requestedTrack.title,
+        sourceUri: requestedTrack.sourceUri,
+        sourceType: requestedTrack.sourceType,
+        currentNowPlayingId: nowPlayingTrack?.id,
+        pendingTrackId: requestedTrack.id,
+        activeAudioSource,
+      });
+
+      const loadTrack = async () => {
+        const libraryTrack = queue.library.find(
+          (track) => track.id === requestedTrack.id,
+        ) ?? (requestedTrack.sourceTrackId
+          ? queue.library.find((track) => track.id === requestedTrack.sourceTrackId)
+          : undefined) ?? queue.library.find(
+          (track) =>
+            !!requestedTrack.sourceUri && track.sourceUri === requestedTrack.sourceUri,
+        );
+
+        if (libraryTrack) {
+          lastTrack.saveLastTrack(libraryTrack.id);
+        }
+
+        try {
+          const playbackRequestStartMs = performance.now();
+          const resolveStartMs = playbackRequestStartMs;
+          const { source, resolveResult } = await resolveTrackSource(requestedTrack, {
+            requestId,
+            reason,
+          });
+          const resolveEndMs = performance.now();
+
+          if (
+            trackLoadRequestRef.current !== requestId ||
+            currentTrackIdRef.current !== requestedTrack.id
+          ) {
+            console.info("[PLAYBACK_CANCELLED]", { requestId, reason: "after_resolve" });
+            return;
+          }
+
+          const loadFileStartMs = performance.now();
+          const loaded = await audioProcessor.loadFile(source, dspParams, {
+            requestId,
+            isCurrentRequest: () =>
+              trackLoadRequestRef.current === requestId &&
+              currentTrackIdRef.current === requestedTrack.id,
+          });
+          const loadFileEndMs = performance.now();
+          const isCurrentAfterLoad =
+            trackLoadRequestRef.current === requestId &&
+            currentTrackIdRef.current === requestedTrack.id;
+          console.info("[LOAD_FILE_RESULT]", {
+            requestId,
+            loaded,
+            source,
+            isCurrentRequest: isCurrentAfterLoad,
+          });
+
+          if (!loaded || !isCurrentAfterLoad) {
+            console.info("[PLAYBACK_CANCELLED]", {
+              requestId,
+              reason: loaded ? "stale_after_load" : "load_failed_or_cancelled",
+            });
+            return;
+          }
+
+          const activeSrc = audioProcessor.getActiveSource();
+          if (!activeSrc) {
+            console.info("[PLAYBACK_CANCELLED]", { requestId, reason: "missing_active_source" });
+            return;
+          }
+          setNowPlayingTrack(requestedTrack);
+          setPendingTrack(null);
+          setActiveAudioSource(activeSrc);
+          console.info("[NOW_PLAYING_COMMIT]", {
+            requestId,
+            reason,
+            title: requestedTrack.title,
+            activeSrc,
+            totalTimeToCommitMs: loadFileEndMs - playbackRequestStartMs,
+            streamUrlUsed: !!resolveResult?.streamUrl,
+          });
+
+          const playCallMs = performance.now();
+          console.info("[PlaybackLatency] playRequest", {
+            trackId: requestedTrack.id,
+            sourceTrackId: requestedTrack.sourceTrackId,
+            playbackRequestStartMs,
+            resolveStartMs,
+            resolveEndMs,
+            loadFileStartMs,
+            loadFileEndMs,
+            playCallMs,
+            resolveDurationMs: resolveEndMs - resolveStartMs,
+            loadFileDurationMs: loadFileEndMs - loadFileStartMs,
+            totalBeforePlayMs: playCallMs - playbackRequestStartMs,
+          });
+          audioProcessor.play();
+
+          autoOptimizationTimeoutRef.current = window.setTimeout(() => {
+            if (
+              trackLoadRequestRef.current !== requestId ||
+              currentTrackIdRef.current !== requestedTrack.id
+            ) {
+              return;
+            }
+
+            void runAutoOptimization();
+          }, 1400);
+        } catch (error) {
+          if (
+            trackLoadRequestRef.current === requestId &&
+            currentTrackIdRef.current === requestedTrack.id
+          ) {
+            failedQueueTrackIdsRef.current.add(requestedTrack.id);
+            audioProcessor.resetAfterError();
+            currentTrackRef.current = null;
+            console.error("[PLAYBACK_ERROR]", {
+              requestId,
+              error,
+              activeSrc: audioProcessor.getActiveSource(),
+              requestedTrackId: requestedTrack.id,
+            });
+            setPendingTrack(null);
+            const movedToNextTrack = playNextAvailableTrackAfterFailure(
+              requestedTrack.id,
+            );
+
+            if (movedToNextTrack) {
+              toast.error(t("actions.errorLoadingTrackSkipped"));
+            } else {
+              failedQueueTrackIdsRef.current.clear();
+              toast.error(t("actions.errorLoadingTrackNoFallback"));
+            }
+          }
+        }
+      };
+
+      void loadTrack();
+    },
+    [
+      audioProcessor,
+      clearPendingPlaybackTimers,
+      dspParams,
+      lastTrack.saveLastTrack,
+      queue.library,
+      resolveTrackSource,
+      playNextAvailableTrackAfterFailure,
+      activeAudioSource,
+      nowPlayingTrack,
+      t,
+    ],
+  );
+
   // Cargar track cuando cambia (y guardar como último track)
   useEffect(() => {
     const requestedTrack = queue.currentTrack;
@@ -625,99 +906,10 @@ export default function Home() {
       return;
     }
 
-    const requestId = ++trackLoadRequestRef.current;
-    clearPendingPlaybackTimers();
-    currentTrackRef.current = requestedTrack.id;
-
-    const loadTrack = async () => {
-      const libraryTrack = queue.library.find(
-        (track) =>
-          track.sourceUri === requestedTrack.sourceUri ||
-          (track.title === requestedTrack.title &&
-            track.artist === requestedTrack.artist),
-      );
-
-      if (libraryTrack) {
-        lastTrack.saveLastTrack(libraryTrack.id);
-      }
-
-      try {
-        const source = await resolveTrackSource(requestedTrack);
-
-        if (
-          trackLoadRequestRef.current !== requestId ||
-          queue.currentTrack?.id !== requestedTrack.id
-        ) {
-          return;
-        }
-
-        await audioProcessor.loadFile(source, dspParams);
-
-        if (
-          trackLoadRequestRef.current !== requestId ||
-          queue.currentTrack?.id !== requestedTrack.id
-        ) {
-          return;
-        }
-
-        playTimeoutRef.current = window.setTimeout(() => {
-          if (
-            trackLoadRequestRef.current !== requestId ||
-            queue.currentTrack?.id !== requestedTrack.id
-          ) {
-            return;
-          }
-
-          audioProcessor.play();
-
-          autoOptimizationTimeoutRef.current = window.setTimeout(() => {
-            if (
-              trackLoadRequestRef.current !== requestId ||
-              queue.currentTrack?.id !== requestedTrack.id
-            ) {
-              return;
-            }
-
-            void runAutoOptimization();
-          }, 1400);
-        }, 100);
-      } catch (error) {
-        if (
-          trackLoadRequestRef.current === requestId &&
-          queue.currentTrack?.id === requestedTrack.id
-        ) {
-          failedQueueTrackIdsRef.current.add(requestedTrack.id);
-          audioProcessor.resetAfterError();
-          currentTrackRef.current = null;
-          console.error("Error loading track:", error);
-          const movedToNextTrack = playNextAvailableTrackAfterFailure(
-            requestedTrack.id,
-          );
-
-          if (movedToNextTrack) {
-            toast.error(t("actions.errorLoadingTrackSkipped"));
-          } else {
-            failedQueueTrackIdsRef.current.clear();
-            toast.error(t("actions.errorLoadingTrackNoFallback"));
-          }
-        }
-      }
-    };
-
-    void loadTrack();
-  }, [
-    audioProcessor,
-    clearPendingPlaybackTimers,
-    dspParams,
-    lastTrack.saveLastTrack,
-    queue.currentTrack,
-    queue.library,
-    queue.playTrack,
-    queue.queue,
-    resolveTrackSource,
-    playNextAvailableTrackAfterFailure,
-    t,
-  ]);
+    const reason = playbackReasonRef.current || "queue-change";
+    playbackReasonRef.current = "queue-change";
+    requestTrackPlayback(requestedTrack, reason);
+  }, [queue.currentTrack, requestTrackPlayback]);
 
   const handleFileSelect = useCallback(async () => {
     const input = document.createElement("input");
@@ -918,6 +1110,8 @@ export default function Home() {
   };
 
   const handlePlayNow = (track: Track) => {
+    playbackReasonRef.current = "manual";
+    currentTrackRef.current = null;
     queue.playNow(track);
     setContextMenu(null);
     setActiveTab("player");
@@ -946,7 +1140,20 @@ export default function Home() {
       toast.error(t("actions.noSongsToPlay"));
       return;
     }
-    queue.shuffleAll(tracks);
+    const candidates = tracks.length > 1 && nowPlayingTrack
+      ? tracks.filter((track) => track.id !== nowPlayingTrack.id)
+      : tracks;
+    const randomIndex = Math.floor(Math.random() * candidates.length);
+    const randomTrack = candidates[randomIndex] ?? tracks[0];
+    console.info("[SHUFFLE_REQUEST]", {
+      randomIndex,
+      randomTrackId: randomTrack.id,
+      randomTitle: randomTrack.title,
+      previousNowPlayingId: nowPlayingTrack?.id,
+    });
+    playbackReasonRef.current = "shuffle";
+    currentTrackRef.current = null;
+    queue.shuffleAll(tracks, randomTrack.id);
     toast.success(t("actions.playingShuffled", { count: tracks.length }));
     setActiveTab("player");
     setShowQueue(false);
@@ -957,6 +1164,8 @@ export default function Home() {
       toast.error(t("actions.noSongsToPlay"));
       return;
     }
+    playbackReasonRef.current = "manual-order";
+    currentTrackRef.current = null;
     queue.playAllInOrder(tracks);
     toast.success(t("actions.playingAll", { count: tracks.length }));
     setActiveTab("player");
@@ -1362,13 +1571,24 @@ export default function Home() {
         onOpenFilePicker={handleFileSelect}
         queue={{
           queue: queue.queue,
-          currentTrack: queue.currentTrack,
-          currentTrackIndex: queue.currentTrackIndex,
-          playTrack: queue.playTrack,
+          currentTrack: nowPlayingTrack,
+          currentTrackIndex: nowPlayingTrack
+            ? queue.queue.findIndex((track) => track.id === nowPlayingTrack.id)
+            : queue.currentTrackIndex,
+          playTrack: (index: number) => {
+            playbackReasonRef.current = "manual";
+            queue.playTrack(index);
+          },
           removeFromQueue: queue.removeFromQueue,
           reorderQueue: queue.reorderQueue,
-          previousTrack: queue.previousTrack,
-          nextTrack: queue.nextTrack,
+          previousTrack: () => {
+            playbackReasonRef.current = "previous";
+            queue.previousTrack();
+          },
+          nextTrack: () => {
+            playbackReasonRef.current = "next";
+            queue.nextTrack();
+          },
         }}
         audioProcessor={{
           currentTime: audioProcessor.currentTime,

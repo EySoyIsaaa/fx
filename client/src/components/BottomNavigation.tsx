@@ -46,11 +46,11 @@ const getAndroidNavigationOffset = () => {
   const screenGap = Math.max(0, window.screen.height - window.innerHeight);
   const detectedGap = Math.max(viewportGap, screenGap);
 
-  if (detectedGap >= 24) return Math.min(34, detectedGap);
+  if (detectedGap >= 24) return Math.min(24, detectedGap);
 
   // Some Android WebViews report a zero safe-area even when the 3-button
-  // navigation bar overlays the bottom edge, so reserve a small lift.
-  return 16;
+  // navigation bar overlays the bottom edge, so reserve a smaller lift.
+  return 8;
 };
 
 export function BottomNavigation({
