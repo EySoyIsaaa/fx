@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { logger } from "@/lib/logger";
 
-const ANDROID_FAST_STREAMING_ENABLED = true;
+const ANDROID_FAST_STREAMING_ENABLED = false;
 
 
 export interface AndroidAudioFileUrlResult {
@@ -9,6 +9,8 @@ export interface AndroidAudioFileUrlResult {
   streamUrl?: string;
   fileUrl?: string;
   filePath?: string;
+  playbackSource?: string;
+  sourceUriScheme?: string;
   resolvedUrl?: string;
   mimeType?: string;
   cached?: boolean;
@@ -292,7 +294,8 @@ export function useAndroidMusicLibrary() {
       }
 
       const allowStreaming = options?.allowStreaming ?? ANDROID_FAST_STREAMING_ENABLED;
-      logger.debug('🎵 Obteniendo URL de archivo para:', { contentUri, trackId, allowStreaming });
+      const sourceUriScheme = contentUri.includes(':') ? contentUri.split(':', 1)[0] : 'unknown';
+      logger.debug('🎵 Obteniendo URL de archivo para:', { contentUri, sourceUriScheme, trackId, allowStreaming });
       const result = await MusicScanner.getAudioFileUrl({
         contentUri,
         trackId,
@@ -301,9 +304,20 @@ export function useAndroidMusicLibrary() {
         allowStreaming,
       });
       const resolveDurationMs = performance.now() - resolveStartMs;
+      const nativePlaybackSource = result?.playbackSource || (result?.streamUrl ? 'localhost-stream' : result?.filePath ? 'cache-local' : 'unknown');
+      logger.info('[PlaybackSource] native resolve result', {
+        trackId,
+        sourceUriScheme: result?.sourceUriScheme || sourceUriScheme,
+        playbackSource: nativePlaybackSource,
+        allowStreaming,
+        hasStreamUrl: !!result?.streamUrl,
+        hasFilePath: !!result?.filePath,
+        cacheHit: result?.cacheHit ?? result?.cached ?? false,
+        filePath: result?.filePath,
+      });
       
       if (allowStreaming && result?.streamUrl) {
-        logger.debug('✅ URL de streaming obtenida', { streamUrl: result.streamUrl, cached: result.cached });
+        logger.debug('✅ URL de streaming obtenida', { streamUrl: result.streamUrl, cached: result.cached, playbackSource: nativePlaybackSource });
         return {
           ...result,
           url: result.streamUrl,
@@ -311,6 +325,8 @@ export function useAndroidMusicLibrary() {
           cacheHit: result.cacheHit ?? result.cached ?? false,
           copyTimeMs: result.copyTimeMs ?? 0,
           resolveDurationMs,
+          playbackSource: nativePlaybackSource,
+          sourceUriScheme: result?.sourceUriScheme || sourceUriScheme,
         };
       }
 
@@ -330,6 +346,8 @@ export function useAndroidMusicLibrary() {
           cacheHit: result.cacheHit ?? result.cached ?? false,
           copyTimeMs: result.copyTimeMs ?? 0,
           resolveDurationMs,
+          playbackSource: nativePlaybackSource,
+          sourceUriScheme: result?.sourceUriScheme || sourceUriScheme,
         };
       }
       
