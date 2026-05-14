@@ -1,16 +1,10 @@
 /**
- * Epicenter Hi-Fi - Persistent Music Library
- * Guarda los archivos de audio, metadatos y playlists en IndexedDB
- * 
- * v1.1.2 - Added playlists support with track ID references
+ * Epicenter Hi-Fi - Native persistent music library adapter.
+ *
+ * Esta versión de Android usa exclusivamente la biblioteca nativa SQLite/Room
+ * expuesta por el plugin MusicScanner. IndexedDB queda deshabilitada para evitar
+ * que el WebView conserve copias o metadatos divergentes de las canciones.
  */
-
-const DB_NAME = 'epicenter-music-db';
-const DB_VERSION = 4; // v4 adds robust source identity metadata
-const TRACKS_STORE = 'tracks';
-const AUDIO_STORE = 'audio-files';
-const PLAYLISTS_STORE = 'playlists';
-
 
 const isAndroidNativeLibraryAvailable = (): boolean => {
   if (typeof window === 'undefined') return false;
@@ -20,21 +14,20 @@ const isAndroidNativeLibraryAvailable = (): boolean => {
 
 const getMusicScanner = () => (window as any).Capacitor?.Plugins?.MusicScanner;
 
+const requireNativeLibrary = () => {
+  const plugin = getMusicScanner();
+  if (!isAndroidNativeLibraryAvailable() || !plugin) {
+    throw new Error('Native Android music library is required; IndexedDB is disabled');
+  }
+  return plugin;
+};
+
 const mapNativeTrack = (track: any): StoredTrackMetadata => {
   const albumId = typeof track.albumId === 'number' ? track.albumId : undefined;
   const reconstructedAlbumArtUri = !track.albumArtUri && albumId && albumId > 0
     ? `content://media/external/audio/albumart/${albumId}`
     : undefined;
   const albumArtUri = track.albumArtUri || reconstructedAlbumArtUri;
-
-  console.info('[ARTWORK_MAP]', {
-    id: String(track.stableId || track.id || ''),
-    title: track.title || track.name || 'Unknown',
-    albumId,
-    albumArtUri,
-    preservedAlbumArtUri: track.albumArtUri,
-    reconstructedAlbumArtUri,
-  });
 
   return {
     id: String(track.stableId || track.id || ''),
@@ -49,7 +42,7 @@ const mapNativeTrack = (track: any): StoredTrackMetadata => {
     fileName: track.name || track.title || 'Unknown',
     fileType: track.mimeType || 'audio/mpeg',
     fileSize: typeof track.size === 'number' ? track.size : 0,
-    addedAt: Date.now(),
+    addedAt: typeof track.createdAt === 'number' ? track.createdAt * 1000 : Date.now(),
     sourceUri: track.contentUri || track.sourceUri,
     sourceType: track.sourceType === 'manual-uri' ? 'manual-uri' : 'media-store',
     albumId,
@@ -57,14 +50,14 @@ const mapNativeTrack = (track: any): StoredTrackMetadata => {
     mediaStoreId: String(track.mediaStoreId || ''),
     dateModified: typeof track.dateModified === 'number' ? track.dateModified : undefined,
     sourceVersionKey: track.sourceVersionKey || `${track.mediaStoreId || track.id}:${track.size || 0}:${track.dateModified || 0}`,
-    unavailable: false,
-    unavailableReason: '',
-    lastSeenAt: Date.now(),
-    missingSince: 0,
-    missingCount: 0,
-    scanCompleteness: 'complete',
+    unavailable: !!track.unavailable,
+    unavailableReason: track.unavailableReason || '',
+    lastSeenAt: typeof track.lastSeenAt === 'number' ? track.lastSeenAt * 1000 : Date.now(),
+    missingSince: typeof track.missingSince === 'number' ? track.missingSince * 1000 : 0,
+    missingCount: typeof track.missingCount === 'number' ? track.missingCount : 0,
+    scanCompleteness: track.scanCompleteness === 'partial' ? 'partial' : 'complete',
     lastValidatedAt: Date.now(),
-    fingerprint: `${track.id || ''}_${track.size || 0}_${track.dateModified || 0}`,
+    fingerprint: `${track.sourceType || 'media-store'}_${track.mediaStoreId || track.id || ''}_${track.size || 0}_${track.dateModified || 0}`,
   };
 };
 
@@ -96,94 +89,23 @@ export interface StoredTrackMetadata {
   missingCount?: number;
   scanCompleteness?: 'partial' | 'complete';
   lastValidatedAt?: number;
-  // For duplicate detection
-  fingerprint?: string; // fileName + fileSize combination
+  fingerprint?: string;
 }
 
 export interface StoredPlaylist {
   id: string;
   name: string;
-  trackIds: string[]; // Only references to track IDs
+  trackIds: string[];
   createdAt: number;
   updatedAt: number;
-  coverUrl?: string; // First track's cover or custom
+  coverUrl?: string;
 }
 
 class MusicLibraryDB {
-  private db: IDBDatabase | null = null;
-  private initPromise: Promise<void> | null = null;
-
   async init(): Promise<void> {
-    if (this.db) return;
-    if (this.initPromise) return this.initPromise;
-
-    this.initPromise = new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-      request.onerror = () => {
-        console.error('Error opening IndexedDB:', request.error);
-        reject(request.error);
-      };
-
-      request.onsuccess = () => {
-        this.db = request.result;
-        console.log('[MusicLibraryDB] Database initialized v4');
-        resolve();
-      };
-
-      request.onupgradeneeded = (event) => {
-        const db = (event.target as IDBOpenDBRequest).result;
-        
-        // Store para metadatos de tracks
-        if (!db.objectStoreNames.contains(TRACKS_STORE)) {
-          const tracksStore = db.createObjectStore(TRACKS_STORE, { keyPath: 'id' });
-          tracksStore.createIndex('title', 'title', { unique: false });
-          tracksStore.createIndex('artist', 'artist', { unique: false });
-          tracksStore.createIndex('addedAt', 'addedAt', { unique: false });
-          tracksStore.createIndex('fingerprint', 'fingerprint', { unique: false });
-          tracksStore.createIndex('sourceUri', 'sourceUri', { unique: false });
-          tracksStore.createIndex('mediaStoreId', 'mediaStoreId', { unique: false });
-        } else {
-          // Add missing indexes on upgrade
-          const transaction = (event.target as IDBOpenDBRequest).transaction;
-          if (transaction) {
-            const tracksStore = transaction.objectStore(TRACKS_STORE);
-            if (!tracksStore.indexNames.contains('fingerprint')) {
-              tracksStore.createIndex('fingerprint', 'fingerprint', { unique: false });
-            }
-            if (!tracksStore.indexNames.contains('sourceUri')) {
-              tracksStore.createIndex('sourceUri', 'sourceUri', { unique: false });
-            }
-            if (!tracksStore.indexNames.contains('mediaStoreId')) {
-              tracksStore.createIndex('mediaStoreId', 'mediaStoreId', { unique: false });
-            }
-          }
-        }
-
-        // Store para archivos de audio (Blobs)
-        if (!db.objectStoreNames.contains(AUDIO_STORE)) {
-          db.createObjectStore(AUDIO_STORE, { keyPath: 'id' });
-        }
-
-        // Store para playlists (NEW in v3)
-        if (!db.objectStoreNames.contains(PLAYLISTS_STORE)) {
-          const playlistsStore = db.createObjectStore(PLAYLISTS_STORE, { keyPath: 'id' });
-          playlistsStore.createIndex('name', 'name', { unique: false });
-          playlistsStore.createIndex('createdAt', 'createdAt', { unique: false });
-        }
-      };
-    });
-
-    return this.initPromise;
+    requireNativeLibrary();
   }
 
-  private async getDB(): Promise<IDBDatabase> {
-    await this.init();
-    if (!this.db) throw new Error('Database not initialized');
-    return this.db;
-  }
-
-  // Generate fingerprint for duplicate detection
   generateFingerprint(
     fileName: string,
     fileSize: number,
@@ -199,99 +121,41 @@ class MusicLibraryDB {
     const normalizedArtist = (options?.artist || '').toLowerCase().trim();
     const normalizedTitle = (options?.title || '').toLowerCase().trim();
     const normalizedDuration = Math.round((options?.duration || 0) * 10) / 10;
-    const sourceType = options?.sourceType || 'file';
+    const sourceType = options?.sourceType || 'manual-uri';
     const mediaStorePart = options?.mediaStoreId ? `_${options.mediaStoreId}` : '';
     return `${sourceType}${mediaStorePart}_${normalizedName}_${fileSize}_${normalizedDuration}_${normalizedArtist}_${normalizedTitle}`;
   }
 
-  // Check if track already exists by fingerprint
   async findTrackByFingerprint(fingerprint: string): Promise<StoredTrackMetadata | null> {
-    if (isAndroidNativeLibraryAvailable()) {
-      const all = await this.getAllTrackMetadata();
-      return all.find((t) => t.fingerprint === fingerprint) || null;
-    }
-
-    const db = await this.getDB();
-
-    return new Promise((resolve, reject) => {
-      try {
-        const transaction = db.transaction(TRACKS_STORE, 'readonly');
-        const store = transaction.objectStore(TRACKS_STORE);
-        
-        // Check if fingerprint index exists
-        if (!store.indexNames.contains('fingerprint')) {
-          console.warn('[MusicLibraryDB] fingerprint index not found, searching all tracks');
-          // Fallback: search all tracks manually
-          const request = store.getAll();
-          request.onerror = () => reject(request.error);
-          request.onsuccess = () => {
-            const tracks = request.result as StoredTrackMetadata[];
-            const found = tracks.find(t => t.fingerprint === fingerprint);
-            resolve(found || null);
-          };
-          return;
-        }
-        
-        const index = store.index('fingerprint');
-        const request = index.get(fingerprint);
-
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => {
-          resolve(request.result || null);
-        };
-      } catch (error) {
-        console.error('[MusicLibraryDB] Error in findTrackByFingerprint:', error);
-        resolve(null);
-      }
-    });
+    const all = await this.getAllTrackMetadata();
+    return all.find((t) => t.fingerprint === fingerprint) || null;
   }
 
-  // Guardar un track completo (metadatos + archivo de audio)
   async saveTrack(
-    id: string,
-    metadata: Omit<StoredTrackMetadata, 'id'>,
-    audioBlob: Blob
+    _id: string,
+    _metadata: Omit<StoredTrackMetadata, 'id'>,
+    _audioBlob: Blob,
   ): Promise<void> {
-    const db = await this.getDB();
-
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction([TRACKS_STORE, AUDIO_STORE], 'readwrite');
-      
-      transaction.onerror = () => reject(transaction.error);
-      transaction.oncomplete = () => resolve();
-
-      // Guardar metadatos
-      const tracksStore = transaction.objectStore(TRACKS_STORE);
-      tracksStore.put({ id, ...metadata });
-
-      // Guardar archivo de audio
-      const audioStore = transaction.objectStore(AUDIO_STORE);
-      audioStore.put({ id, blob: audioBlob });
-    });
+    throw new Error('Saving Web File blobs is disabled. Use MusicScanner.pickManualAudioTracks so Room stores content:// URIs.');
   }
 
-  // Guardar un track solo con metadatos (sin duplicar el audio)
   async saveTrackReference(
-    id: string,
-    metadata: Omit<StoredTrackMetadata, 'id'>
+    _id: string,
+    _metadata: Omit<StoredTrackMetadata, 'id'>,
   ): Promise<void> {
-    if (isAndroidNativeLibraryAvailable()) {
-      return;
-    }
-
-    const db = await this.getDB();
-
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(TRACKS_STORE, 'readwrite');
-
-      transaction.onerror = () => reject(transaction.error);
-      transaction.oncomplete = () => resolve();
-
-      const tracksStore = transaction.objectStore(TRACKS_STORE);
-      tracksStore.put({ id, ...metadata });
-    });
+    // Room is the source of truth. References are created by native scan/import methods.
   }
 
+  async importManualTracksFromPicker(): Promise<{ records: StoredTrackMetadata[]; changed: number; count: number }> {
+    const plugin = requireNativeLibrary();
+    const result = await plugin.pickManualAudioTracks();
+    const records = (result?.records || []).map(mapNativeTrack);
+    return {
+      records,
+      changed: Number(result?.changed || records.length || 0),
+      count: Number(result?.count || 0),
+    };
+  }
 
   async getTrackMetadataPage(params?: {
     page?: number;
@@ -300,251 +164,67 @@ class MusicLibraryDB {
     sortBy?: 'title' | 'artist' | 'dateModified';
     sortDir?: 'asc' | 'desc';
   }): Promise<{ records: StoredTrackMetadata[]; total: number; page: number; pageSize: number }> {
-    if (isAndroidNativeLibraryAvailable()) {
-      const plugin = getMusicScanner();
-      const page = params?.page ?? 1;
-      const pageSize = params?.pageSize ?? 100;
-      const result = await plugin.getLibraryPage({
-        page,
-        pageSize,
-        search: params?.search ?? '',
-        sortBy: params?.sortBy ?? 'dateModified',
-        sortDir: params?.sortDir ?? 'desc',
-      });
-      return {
-        records: (result?.records || []).map(mapNativeTrack),
-        total: Number(result?.total || 0),
-        page: Number(result?.page || page),
-        pageSize: Number(result?.pageSize || pageSize),
-      };
-    }
-
-    const all = await this.getAllTrackMetadata();
-    const page = Math.max(1, params?.page ?? 1);
-    const pageSize = Math.max(1, params?.pageSize ?? 100);
-    const fromIndex = Math.min(all.length, (page - 1) * pageSize);
-    const toIndex = Math.min(all.length, fromIndex + pageSize);
-    return { records: all.slice(fromIndex, toIndex), total: all.length, page, pageSize };
-  }
-
-  // Obtener todos los metadatos de tracks
-  async getAllTrackMetadata(): Promise<StoredTrackMetadata[]> {
-    if (isAndroidNativeLibraryAvailable()) {
-      const plugin = getMusicScanner();
-      const first = await plugin.getLibraryPage({ page: 1, pageSize: 100, search: '', sortBy: 'dateModified', sortDir: 'desc' });
-      const total = Number(first?.total || 0);
-      const pageSize = 100;
-      const pages = Math.max(1, Math.ceil(total / pageSize));
-      const records = [...(first?.records || [])];
-      for (let page = 2; page <= pages; page++) {
-        const next = await plugin.getLibraryPage({ page, pageSize, search: '', sortBy: 'dateModified', sortDir: 'desc' });
-        records.push(...(next?.records || []));
-      }
-      return records.map(mapNativeTrack);
-    }
-
-    const db = await this.getDB();
-
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(TRACKS_STORE, 'readonly');
-      const store = transaction.objectStore(TRACKS_STORE);
-      const request = store.getAll();
-
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => {
-        const tracks = request.result.sort((a, b) => b.addedAt - a.addedAt);
-        resolve(tracks);
-      };
+    const plugin = requireNativeLibrary();
+    const page = params?.page ?? 1;
+    const pageSize = params?.pageSize ?? 100;
+    const result = await plugin.getLibraryPage({
+      page,
+      pageSize,
+      search: params?.search ?? '',
+      sortBy: params?.sortBy ?? 'dateModified',
+      sortDir: params?.sortDir ?? 'desc',
     });
-  }
-
-  // Obtener el archivo de audio de un track
-  async getAudioBlob(id: string): Promise<Blob | null> {
-    const db = await this.getDB();
-
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(AUDIO_STORE, 'readonly');
-      const store = transaction.objectStore(AUDIO_STORE);
-      const request = store.get(id);
-
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => {
-        resolve(request.result?.blob || null);
-      };
-    });
-  }
-
-  // Eliminar un track
-  async deleteTrack(id: string): Promise<void> {
-    if (isAndroidNativeLibraryAvailable()) {
-      const plugin = getMusicScanner();
-      await plugin.deleteTrackById({ id });
-      return;
-    }
-
-    const db = await this.getDB();
-
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction([TRACKS_STORE, AUDIO_STORE], 'readwrite');
-      
-      transaction.onerror = () => reject(transaction.error);
-      transaction.oncomplete = () => resolve();
-
-      transaction.objectStore(TRACKS_STORE).delete(id);
-      transaction.objectStore(AUDIO_STORE).delete(id);
-    });
-  }
-
-  // Limpiar toda la biblioteca
-  async clearAll(): Promise<void> {
-    if (isAndroidNativeLibraryAvailable()) {
-      const plugin = getMusicScanner();
-      await plugin.clearNativeLibrary();
-      return;
-    }
-
-    const db = await this.getDB();
-
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction([TRACKS_STORE, AUDIO_STORE, PLAYLISTS_STORE], 'readwrite');
-      
-      transaction.onerror = () => reject(transaction.error);
-      transaction.oncomplete = () => resolve();
-
-      transaction.objectStore(TRACKS_STORE).clear();
-      transaction.objectStore(AUDIO_STORE).clear();
-      transaction.objectStore(PLAYLISTS_STORE).clear();
-    });
-  }
-
-  // ==================== PLAYLIST METHODS ====================
-
-  // Create a new playlist
-  async createPlaylist(name: string): Promise<StoredPlaylist> {
-    const db = await this.getDB();
-    const playlist: StoredPlaylist = {
-      id: `playlist-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      name,
-      trackIds: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+    return {
+      records: (result?.records || []).map(mapNativeTrack),
+      total: Number(result?.total || 0),
+      page: Number(result?.page || page),
+      pageSize: Number(result?.pageSize || pageSize),
     };
-
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(PLAYLISTS_STORE, 'readwrite');
-      const store = transaction.objectStore(PLAYLISTS_STORE);
-      const request = store.add(playlist);
-
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(playlist);
-    });
   }
 
-  // Get all playlists
-  async getAllPlaylists(): Promise<StoredPlaylist[]> {
-    const db = await this.getDB();
-
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(PLAYLISTS_STORE, 'readonly');
-      const store = transaction.objectStore(PLAYLISTS_STORE);
-      const request = store.getAll();
-
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => {
-        const playlists = request.result.sort((a, b) => b.updatedAt - a.updatedAt);
-        resolve(playlists);
-      };
-    });
-  }
-
-  // Get a single playlist by ID
-  async getPlaylist(id: string): Promise<StoredPlaylist | null> {
-    const db = await this.getDB();
-
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(PLAYLISTS_STORE, 'readonly');
-      const store = transaction.objectStore(PLAYLISTS_STORE);
-      const request = store.get(id);
-
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result || null);
-    });
-  }
-
-  // Update playlist
-  async updatePlaylist(playlist: StoredPlaylist): Promise<void> {
-    const db = await this.getDB();
-
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(PLAYLISTS_STORE, 'readwrite');
-      const store = transaction.objectStore(PLAYLISTS_STORE);
-      const request = store.put({ ...playlist, updatedAt: Date.now() });
-
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve();
-    });
-  }
-
-  // Delete playlist
-  async deletePlaylist(id: string): Promise<void> {
-    const db = await this.getDB();
-
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(PLAYLISTS_STORE, 'readwrite');
-      const store = transaction.objectStore(PLAYLISTS_STORE);
-      const request = store.delete(id);
-
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve();
-    });
-  }
-
-  // Add track to playlist
-  async addTrackToPlaylist(playlistId: string, trackId: string): Promise<void> {
-    const playlist = await this.getPlaylist(playlistId);
-    if (!playlist) throw new Error('Playlist not found');
-
-    if (!playlist.trackIds.includes(trackId)) {
-      playlist.trackIds.push(trackId);
-      await this.updatePlaylist(playlist);
+  async getAllTrackMetadata(): Promise<StoredTrackMetadata[]> {
+    const plugin = requireNativeLibrary();
+    const first = await plugin.getLibraryPage({ page: 1, pageSize: 100, search: '', sortBy: 'dateModified', sortDir: 'desc' });
+    const total = Number(first?.total || 0);
+    const pageSize = 100;
+    const pages = Math.max(1, Math.ceil(total / pageSize));
+    const records = [...(first?.records || [])];
+    for (let page = 2; page <= pages; page++) {
+      const next = await plugin.getLibraryPage({ page, pageSize, search: '', sortBy: 'dateModified', sortDir: 'desc' });
+      records.push(...(next?.records || []));
     }
+    return records.map(mapNativeTrack);
   }
 
-  // Remove track from playlist
-  async removeTrackFromPlaylist(playlistId: string, trackId: string): Promise<void> {
-    const playlist = await this.getPlaylist(playlistId);
-    if (!playlist) throw new Error('Playlist not found');
-
-    playlist.trackIds = playlist.trackIds.filter(id => id !== trackId);
-    await this.updatePlaylist(playlist);
+  async getAudioBlob(_id: string): Promise<Blob | null> {
+    return null;
   }
 
-  // Rename playlist
-  async renamePlaylist(id: string, newName: string): Promise<void> {
-    const playlist = await this.getPlaylist(id);
-    if (!playlist) throw new Error('Playlist not found');
-
-    playlist.name = newName;
-    await this.updatePlaylist(playlist);
+  async deleteTrack(id: string): Promise<void> {
+    const plugin = requireNativeLibrary();
+    await plugin.deleteTrackById({ id });
   }
 
-  // Remove deleted tracks from all playlists
-  async cleanupPlaylistReferences(deletedTrackId: string): Promise<void> {
-    const playlists = await this.getAllPlaylists();
-    
-    for (const playlist of playlists) {
-      if (playlist.trackIds.includes(deletedTrackId)) {
-        playlist.trackIds = playlist.trackIds.filter(id => id !== deletedTrackId);
-        await this.updatePlaylist(playlist);
-      }
-    }
+  async clearAll(): Promise<void> {
+    const plugin = requireNativeLibrary();
+    await plugin.clearNativeLibrary();
   }
+
+  async createPlaylist(name: string): Promise<StoredPlaylist> {
+    return { id: `playlist-${Date.now()}`, name, trackIds: [], createdAt: Date.now(), updatedAt: Date.now() };
+  }
+  async getAllPlaylists(): Promise<StoredPlaylist[]> { return []; }
+  async getPlaylist(_id: string): Promise<StoredPlaylist | null> { return null; }
+  async updatePlaylist(_playlist: StoredPlaylist): Promise<void> {}
+  async deletePlaylist(_id: string): Promise<void> {}
+  async addTrackToPlaylist(_playlistId: string, _trackId: string): Promise<void> {}
+  async removeTrackFromPlaylist(_playlistId: string, _trackId: string): Promise<void> {}
+  async renamePlaylist(_id: string, _newName: string): Promise<void> {}
+  async cleanupPlaylistReferences(_deletedTrackId: string): Promise<void> {}
 }
 
-// Singleton instance
 export const musicLibraryDB = new MusicLibraryDB();
 
-// Helper para convertir imagen a base64
 export async function imageToBase64(url: string): Promise<string | undefined> {
   try {
     const response = await fetch(url);
@@ -560,20 +240,10 @@ export async function imageToBase64(url: string): Promise<string | undefined> {
   }
 }
 
-// Helper para convertir File a Blob (para guardar en IndexedDB)
 export function fileToBlob(file: File): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const blob = new Blob([reader.result as ArrayBuffer], { type: file.type });
-      resolve(blob);
-    };
-    reader.onerror = () => reject(reader.error);
-    reader.readAsArrayBuffer(file);
-  });
+  return Promise.resolve(file);
 }
 
-// Helper para crear File desde Blob
 export function blobToFile(blob: Blob, fileName: string, fileType: string): File {
   return new File([blob], fileName, { type: fileType });
 }

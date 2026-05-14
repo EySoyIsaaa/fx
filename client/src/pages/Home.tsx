@@ -101,7 +101,7 @@ const clampDspParam = (key: keyof StreamingParams, value: number): number => {
   }
 };
 
-const ANDROID_FAST_STREAMING_ENABLED = true;
+const ANDROID_FAST_STREAMING_ENABLED = false;
 const ANDROID_PREFETCH_ENABLED = false;
 
 const clampDspParams = (params: StreamingParams): StreamingParams => ({
@@ -377,6 +377,33 @@ export default function Home() {
     nowPlayingTrack,
   ]);
 
+  // Mantener CPU/IO despiertos sólo mientras realmente hay reproducción activa.
+  useEffect(() => {
+    const MusicScanner = (window as any).Capacitor?.Plugins?.MusicScanner;
+    const shouldHoldWakeLock = audioProcessor.isPlaying && !!nowPlayingTrack?.id;
+    const trackId = nowPlayingTrack?.id ?? "none";
+
+    if (shouldHoldWakeLock) {
+      console.info("[PlaybackWakeLock] acquire", { trackId });
+      void MusicScanner?.acquirePlaybackWakeLock?.({ trackId }).catch((error: unknown) => {
+        console.warn("[PlaybackWakeLock] acquire failed", { trackId, error });
+      });
+    } else {
+      console.info("[PlaybackWakeLock] release", { reason: "not-playing", trackId });
+      void MusicScanner?.releasePlaybackWakeLock?.({ reason: "not-playing", trackId }).catch((error: unknown) => {
+        console.warn("[PlaybackWakeLock] release failed", { trackId, error });
+      });
+    }
+
+    return () => {
+      if (!shouldHoldWakeLock) return;
+      console.info("[PlaybackWakeLock] release", { reason: "effect-cleanup", trackId });
+      void MusicScanner?.releasePlaybackWakeLock?.({ reason: "effect-cleanup", trackId }).catch((error: unknown) => {
+        console.warn("[PlaybackWakeLock] cleanup release failed", { trackId, error });
+      });
+    };
+  }, [audioProcessor.isPlaying, nowPlayingTrack?.id]);
+
   // Actualizar posición
   useEffect(() => {
     if (audioProcessor.duration > 0) {
@@ -462,7 +489,10 @@ export default function Home() {
           reason: context?.reason,
           source: fileUrl,
           sourceType: track.sourceType,
+          sourceUriScheme: result?.sourceUriScheme,
+          playbackSource: result?.playbackSource,
           streamUrlUsed: !!result?.streamUrl,
+          localhostUsed: !!fileUrl?.startsWith("http://127.0.0.1"),
           filePathUsed: !!result?.filePath || (!!fileUrl && !fileUrl.startsWith("http://127.0.0.1")),
           cacheHit: result?.cacheHit ?? result?.cached ?? false,
           copyTimeMs: result?.copyTimeMs ?? 0,
@@ -825,6 +855,8 @@ export default function Home() {
             activeSrc,
             totalTimeToCommitMs: loadFileEndMs - playbackRequestStartMs,
             streamUrlUsed: !!resolveResult?.streamUrl,
+            playbackSource: resolveResult?.playbackSource,
+            sourceUriScheme: resolveResult?.sourceUriScheme,
           });
 
           const playCallMs = performance.now();
@@ -912,35 +944,48 @@ export default function Home() {
   }, [queue.currentTrack, requestTrackPlayback]);
 
   const handleFileSelect = useCallback(async () => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = "audio/*,.mp3,.wav,.flac,.ogg,.m4a,.aac";
-    input.multiple = true;
-    input.onchange = async (e) => {
-      const files = Array.from((e.target as HTMLInputElement).files || []);
-      if (files.length > 0) {
+    const isAndroidNative = /android/.test(navigator.userAgent.toLowerCase()) &&
+      !!(window as any).Capacitor?.Plugins?.MusicScanner;
+
+    const handleImportResult = (result: { added: number; duplicates: string[] }) => {
+      if (result.added > 0) {
+        const msg =
+          result.added > 1
+            ? t("actions.songsAddedPlural", { count: result.added })
+            : t("actions.songsAdded", { count: result.added });
+        toast.success(msg);
+      }
+
+      if (result.duplicates.length > 0) {
+        setShowDuplicatesModal(result.duplicates);
+      }
+    };
+
+    try {
+      if (isAndroidNative) {
+        const result = await queue.importManualTracksFromNativePicker();
+        handleImportResult(result);
+        return;
+      }
+
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = "audio/*,.mp3,.wav,.flac,.ogg,.m4a,.aac";
+      input.multiple = true;
+      input.onchange = async (e) => {
+        const files = Array.from((e.target as HTMLInputElement).files || []);
+        if (files.length === 0) return;
         try {
           const result = await queue.addToLibrary(files);
-
-          // Show success message for added songs
-          if (result.added > 0) {
-            const msg =
-              result.added > 1
-                ? t("actions.songsAddedPlural", { count: result.added })
-                : t("actions.songsAdded", { count: result.added });
-            toast.success(msg);
-          }
-
-          // Show duplicates modal if any
-          if (result.duplicates.length > 0) {
-            setShowDuplicatesModal(result.duplicates);
-          }
+          handleImportResult(result);
         } catch (error) {
           toast.error(t("actions.errorAddingSongs"));
         }
-      }
-    };
-    input.click();
+      };
+      input.click();
+    } catch (error) {
+      toast.error(t("actions.errorAddingSongs"));
+    }
   }, [queue, t]);
 
   const handleMediaStoreImport = useCallback(
