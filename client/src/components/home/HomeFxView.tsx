@@ -26,98 +26,77 @@ export function HomeFxView({
   onConcertHallAmountChange,
 }: HomeFxViewProps) {
   const effectsEnabled = reverbEnabled || concertHallEnabled;
+  const meter = [22, 34, 47, 61, 78, 86, 69, 58, 44, 31, 24, 18];
 
   return (
-    <div className="flex-1 flex flex-col" data-testid="fx-view">
-      <header className="flex items-center justify-between px-6 pt-12 pb-4 border-b border-zinc-900">
+    <div className="flex-1 overflow-y-auto px-4 pb-32 pt-12" data-testid="fx-view">
+      <header className="mb-5 flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold">{t("fx.title")}</h2>
-          <p className="text-xs text-zinc-600 mt-0.5">{t("fx.subtitle")}</p>
+          <p className="premium-title text-[10px] font-black text-[var(--ep-red)]">DSP Rack / Output</p>
+          <h2 className="premium-title mt-1 text-2xl font-black text-white">{t("fx.title")}</h2>
+          <p className="mt-1 text-xs text-[var(--ep-text-secondary)]">{t("fx.subtitle")}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <div
-            className={`w-2 h-2 rounded-full transition-all ${
-              effectsEnabled
-                ? "bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]"
-                : "bg-zinc-700"
-            }`}
-          />
-          <span className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">
-            {effectsEnabled ? t("fx.on") : t("fx.off")}
-          </span>
+        <div className="rounded-full border border-[var(--ep-border)] bg-[#0b0b0b] px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-[var(--ep-text-secondary)]">
+          <span className={`mr-2 inline-block h-2 w-2 rounded-full ${effectsEnabled ? "bg-[var(--ep-red)] shadow-[0_0_8px_rgba(255,16,42,0.85)]" : "bg-zinc-700"}`} />
+          {effectsEnabled ? t("fx.on") : t("fx.off")}
         </div>
       </header>
 
-      <div className="flex-1 flex flex-col justify-center gap-5 px-4 py-8">
-        <section className="card-elevated rounded-2xl p-5">
-          <div className="flex items-start justify-between gap-4 mb-5">
-            <div>
-              <h3 className="text-sm font-bold tracking-[0.12em] uppercase">
-                {t("fx.reverb")}
-              </h3>
-              <p className="text-xs text-zinc-600 mt-1 leading-relaxed">
-                {t("fx.reverbDescription")}
-              </p>
-            </div>
-            <Switch checked={reverbEnabled} onCheckedChange={onToggleReverb} />
+      <section className="premium-card rounded-3xl p-5">
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <h3 className="premium-title text-sm font-black text-white">Bass Boost / {t("fx.reverb")}</h3>
+            <p className="mt-1 text-xs leading-relaxed text-[var(--ep-text-muted)]">{t("fx.reverbDescription")}</p>
           </div>
-          <div className="flex items-center justify-between gap-4">
-            <div className="space-y-2 text-[10px] uppercase tracking-[0.14em] text-zinc-500">
-              <p>{t("fx.reverbSpecOne")}</p>
-              <p>{t("fx.reverbSpecTwo")}</p>
-              <p>{t("fx.reverbSpecThree")}</p>
-            </div>
-            <KnobControl
-              label={t("fx.amount")}
-              value={reverbAmount}
-              min={0}
-              max={100}
-              step={1}
-              unit="%"
-              onChange={onReverbAmountChange}
-              disabled={!reverbEnabled}
-            />
+          <Switch checked={reverbEnabled} onCheckedChange={onToggleReverb} />
+        </div>
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-2 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--ep-text-muted)]">
+            <p>{t("fx.reverbSpecOne")}</p>
+            <p>{t("fx.reverbSpecTwo")}</p>
+            <p>{t("fx.reverbSpecThree")}</p>
           </div>
-        </section>
+          <KnobControl label={t("fx.amount")} value={reverbAmount} min={0} max={100} step={1} unit="%" onChange={onReverbAmountChange} disabled={!reverbEnabled} featured />
+        </div>
+      </section>
 
-        <section className="card-elevated rounded-2xl p-5">
-          <div className="flex items-start justify-between gap-4 mb-5">
-            <div>
-              <h3 className="text-sm font-bold tracking-[0.12em] uppercase">
-                {t("fx.concertHall")}
-              </h3>
-              <p className="text-xs text-zinc-600 mt-1 leading-relaxed">
-                {t("fx.concertHallDescription")}
-              </p>
-            </div>
-            <Switch
-              checked={concertHallEnabled}
-              onCheckedChange={onToggleConcertHall}
-            />
+      <section className="premium-card mt-4 rounded-3xl p-5">
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <h3 className="premium-title text-sm font-black text-white">Enhancer / Stereo Expander</h3>
+            <p className="mt-1 text-xs leading-relaxed text-[var(--ep-text-muted)]">{t("fx.concertHallDescription")}</p>
           </div>
-          <div className="flex items-center justify-between gap-4">
-            <div className="space-y-2 text-[10px] uppercase tracking-[0.14em] text-zinc-500">
-              <p>{t("fx.concertSpecOne")}</p>
-              <p>{t("fx.concertSpecTwo")}</p>
-              <p>{t("fx.concertSpecThree")}</p>
-            </div>
-            <KnobControl
-              label={t("fx.amount")}
-              value={concertHallAmount}
-              min={0}
-              max={100}
-              step={1}
-              unit="%"
-              onChange={onConcertHallAmountChange}
-              disabled={!concertHallEnabled}
-            />
+          <Switch checked={concertHallEnabled} onCheckedChange={onToggleConcertHall} />
+        </div>
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-2 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--ep-text-muted)]">
+            <p>{t("fx.concertSpecOne")}</p>
+            <p>{t("fx.concertSpecTwo")}</p>
+            <p>{t("fx.concertSpecThree")}</p>
           </div>
-        </section>
+          <KnobControl label={t("fx.amount")} value={concertHallAmount} min={0} max={100} step={1} unit="%" onChange={onConcertHallAmountChange} disabled={!concertHallEnabled} featured />
+        </div>
+      </section>
 
-        <p className="text-center text-xs text-zinc-600 px-6 leading-relaxed">
-          {t("fx.description")}
-        </p>
-      </div>
+      <section className="mt-4 rounded-3xl border border-[var(--ep-border)] bg-[#080808] p-5">
+        <p className="premium-title mb-4 text-sm font-black text-white">Salida / Diagnóstico de señal</p>
+        <div className="grid grid-cols-3 gap-3 text-center">
+          {["Limiter", "Phase", "Crossover"].map((label) => (
+            <div key={label} className="rounded-2xl border border-[var(--ep-border)] bg-[#111] p-3">
+              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-[var(--ep-text-muted)]">{label}</p>
+              <p className="mt-1 text-xs font-bold text-white">Ready</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-5 space-y-2">
+          <div className="flex justify-between text-[10px] font-black uppercase tracking-[0.14em] text-[var(--ep-text-muted)]"><span>Signal</span><span>-3 dB</span></div>
+          <div className="flex h-10 items-end gap-1 rounded-xl border border-[var(--ep-border)] bg-black p-2">
+            {meter.map((height, index) => <span key={index} className="signal-meter-bar flex-1 rounded-sm" style={{ height: `${height}%`, opacity: 0.28 + index / 18 }} />)}
+          </div>
+        </div>
+      </section>
+
+      <p className="mt-5 px-6 text-center text-xs leading-relaxed text-[var(--ep-text-muted)]">{t("fx.description")}</p>
     </div>
   );
 }

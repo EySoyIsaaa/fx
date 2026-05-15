@@ -279,7 +279,7 @@ export function AddToPlaylistModal({
                   onClick={() => onSelect(playlist.id, track)}
                   className="w-full flex items-center gap-3 p-3 rounded-xl bg-zinc-800/50 hover:bg-zinc-800 transition-colors text-left"
                 >
-                  <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+                  <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-[var(--ep-red)] to-[var(--ep-red-dark)] flex items-center justify-center">
                     <ListMusic className="w-5 h-5 text-white" />
                   </div>
                   <div className="flex-1 min-w-0">
@@ -325,7 +325,7 @@ export function DuplicatesModal({
       <div className="bg-zinc-900 rounded-2xl p-6 w-full max-w-sm border border-zinc-800 max-h-[80vh] min-h-0 flex flex-col">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 rounded-full bg-yellow-500/20 flex items-center justify-center">
-            <AlertCircle className="w-5 h-5 text-yellow-400" />
+            <AlertCircle className="w-5 h-5 text-[var(--ep-red)]" />
           </div>
           <div>
             <h3 className="text-lg font-bold">{t("duplicates.title")}</h3>
