@@ -166,6 +166,24 @@ export const KnobControl: React.FC<KnobControlProps> = React.memo(
 
     const handleEnd = useCallback(() => setIsDragging(false), []);
 
+    const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
+      event.preventDefault();
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      handleStart(event.clientY);
+    };
+
+    const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
+      if (!isDragging) return;
+      event.preventDefault();
+      handleMove(event.clientY);
+    };
+
+    const handlePointerEnd = (event: React.PointerEvent<HTMLCanvasElement>) => {
+      event.preventDefault();
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+      handleEnd();
+    };
+
     useEffect(() => {
       if (!isDragging) return;
       const onMouseMove = (event: MouseEvent) => handleMove(event.clientY);
@@ -188,18 +206,28 @@ export const KnobControl: React.FC<KnobControlProps> = React.memo(
           ref={canvasRef}
           width={size}
           height={size}
-          style={{ width: size, height: size }}
+          style={{ width: size, height: size, touchAction: "none", overscrollBehavior: "contain" }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerEnd}
+          onPointerCancel={handlePointerEnd}
           onMouseDown={(event) => handleStart(event.clientY)}
           onTouchStart={(event) => {
             event.preventDefault();
+            event.stopPropagation();
             handleStart(event.touches[0].clientY);
           }}
           onTouchMove={(event) => {
             event.preventDefault();
+            event.stopPropagation();
             handleMove(event.touches[0].clientY);
           }}
-          onTouchEnd={handleEnd}
-          className={`transition-opacity ${disabled ? "cursor-not-allowed opacity-40" : "cursor-ns-resize"}`}
+          onTouchEnd={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            handleEnd();
+          }}
+          className={`select-none transition-opacity ${disabled ? "cursor-not-allowed opacity-40" : "cursor-ns-resize"}`}
           data-testid={`knob-${label.toLowerCase()}`}
         />
         <div className="text-center">

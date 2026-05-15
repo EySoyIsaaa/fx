@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, SlidersHorizontal, Waves } from "lucide-react";
+import { SlidersHorizontal, Waves } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { KnobControl } from "@/components/KnobControl";
@@ -14,7 +14,6 @@ interface HomeDspViewProps {
   onOpenFx?: () => void;
 }
 
-const presets = ["Deep", "Clean", "Punch", "Demo", "Extreme"];
 
 export function HomeDspView({
   t,
@@ -64,15 +63,6 @@ export function HomeDspView({
               />
             ))}
           </div>
-        </div>
-      </section>
-
-      <section className="mt-4 rounded-3xl border border-[var(--ep-border)] bg-[#0b0b0b] p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <div>
-            <p className="premium-title text-[10px] font-black text-[var(--ep-text-muted)]">PRESET ACTUAL</p>
-            <h3 className="dsp-numeric text-3xl font-black text-white">Deep</h3>
-          </div>
           <div className="flex items-center gap-2 text-[var(--ep-text-secondary)]">
             <ChevronLeft className="h-5 w-5" />
             <ChevronRight className="h-5 w-5" />
@@ -93,16 +83,24 @@ export function HomeDspView({
         ))}
       </section>
 
-      <section className="mt-4 grid grid-cols-2 gap-3">
-        <button onClick={onOpenEq} className="premium-card rounded-2xl p-4 text-left">
-          <SlidersHorizontal className="mb-3 h-5 w-5 text-[var(--ep-red)]" />
-          <p className="premium-title text-xs font-black text-white">EQ DSP</p>
-          <p className="mt-1 text-[11px] text-[var(--ep-text-muted)]">Curva, faders y Q factor</p>
+      <section className="mt-5 grid grid-cols-1 gap-3">
+        <button onClick={onOpenEq} className="premium-card flex items-center gap-4 rounded-3xl p-5 text-left red-glow-subtle">
+          <div className="flex h-14 w-14 flex-none items-center justify-center rounded-2xl border border-[rgba(255,16,42,0.5)] bg-black">
+            <SlidersHorizontal className="h-7 w-7 text-[var(--ep-red)]" />
+          </div>
+          <div>
+            <p className="premium-title text-xl font-black text-white">ECUALIZADOR</p>
+            <p className="mt-1 text-xs text-[var(--ep-text-muted)]">Curva, faders y Q factor</p>
+          </div>
         </button>
-        <button onClick={onOpenFx} className="premium-card rounded-2xl p-4 text-left">
-          <Waves className="mb-3 h-5 w-5 text-[var(--ep-red)]" />
-          <p className="premium-title text-xs font-black text-white">Rack FX</p>
-          <p className="mt-1 text-[11px] text-[var(--ep-text-muted)]">Boost, enhancer, salida</p>
+        <button onClick={onOpenFx} className="premium-card flex items-center gap-4 rounded-3xl p-5 text-left">
+          <div className="flex h-14 w-14 flex-none items-center justify-center rounded-2xl border border-[rgba(255,16,42,0.5)] bg-black">
+            <Waves className="h-7 w-7 text-[var(--ep-red)]" />
+          </div>
+          <div>
+            <p className="premium-title text-xl font-black text-white">EFECTOS</p>
+            <p className="mt-1 text-xs text-[var(--ep-text-muted)]">Boost, enhancer y salida</p>
+          </div>
         </button>
       </section>
 

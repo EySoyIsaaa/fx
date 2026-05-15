@@ -1663,6 +1663,8 @@ export default function Home() {
         onTouchStartChange={setTouchStart}
         formatTime={formatTime}
         hiresAudioBadgeUrl={hiresAudioBadgeUrl}
+        epicenterEnabled={epicenterEnabled}
+        getAnalyserNode={audioProcessor.getAnalyserNode}
       />
 
       {activeTab === "library" && (

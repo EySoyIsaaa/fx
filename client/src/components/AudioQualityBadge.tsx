@@ -45,7 +45,7 @@ export function AudioQualityBadge({
   }
 
   const chips = [
-    isHighRes ? "HI-RES" : "STANDARD",
+    isHighRes ? "HI-RES" : null,
     bitDepth ? `${bitDepth} BIT` : null,
     sampleRate ? `${Math.round(sampleRate / 100) / 10} kHz` : null,
     bitrate ? `${Math.round(bitrate / 1000)} kbps` : null,

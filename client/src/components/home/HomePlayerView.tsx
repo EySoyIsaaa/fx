@@ -2,6 +2,7 @@ import { ChevronDown, Disc3, GripVertical, Pause, Play, Plus, SkipBack, SkipForw
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AudioQualityBadge } from "@/components/AudioQualityBadge";
 import { TrackArtwork } from "@/components/TrackArtwork";
+import { AudioSpectrumMeter } from "@/components/AudioSpectrumMeter";
 import type { Track } from "@/hooks/useAudioQueue";
 import type { TranslateFn } from "@/components/home/types";
 
@@ -42,6 +43,8 @@ interface HomePlayerViewProps {
   onTouchStartChange: (value: TouchStartState) => void;
   formatTime: (seconds: number) => string;
   hiresAudioBadgeUrl: string;
+  epicenterEnabled: boolean;
+  getAnalyserNode: () => AnalyserNode | null;
 }
 
 export function HomePlayerView({
@@ -58,15 +61,16 @@ export function HomePlayerView({
   touchStart,
   onTouchStartChange,
   formatTime,
+  hiresAudioBadgeUrl,
+  epicenterEnabled,
+  getAnalyserNode,
 }: HomePlayerViewProps) {
   if (!isVisible) return null;
 
   const track = queue.currentTrack;
-  const progress = audioProcessor.duration > 0 ? (audioProcessor.currentTime / audioProcessor.duration) * 100 : 0;
-
   if (showQueue) {
     return (
-      <div className="flex flex-1 flex-col px-4 pb-28 pt-12" data-testid="player-view">
+      <div className="flex h-[100dvh] flex-col overflow-hidden px-4 pb-28 pt-10" data-testid="player-view">
         <header className="mb-4 flex items-center justify-between">
           <div>
             <p className="premium-title text-[10px] font-black text-[var(--ep-red)]">Playback Queue</p>
@@ -144,7 +148,7 @@ export function HomePlayerView({
   }
 
   return (
-    <div className="flex flex-1 flex-col px-5 pb-28 pt-12" data-testid="player-view">
+    <div className="flex h-[100dvh] flex-col overflow-hidden px-5 pb-28 pt-8" data-testid="player-view">
       <header className="mb-5 flex items-center justify-between">
         <div>
           <p className="premium-title text-[10px] font-black text-[var(--ep-red)]">EpicenterDSP</p>
@@ -156,7 +160,7 @@ export function HomePlayerView({
       </header>
 
       <div className="flex flex-1 flex-col justify-center">
-        <div className="relative mx-auto w-full max-w-[340px]">
+        <div className="relative mx-auto w-full max-w-[min(72vw,300px)]">
           <div className="absolute -inset-3 rounded-[2rem] bg-[radial-gradient(circle,rgba(255,16,42,0.18),transparent_64%)]" />
           <div className="album-shadow relative aspect-square overflow-hidden rounded-[1.6rem] border border-[var(--ep-border)] bg-[#101010]">
             <TrackArtwork src={track?.coverUrl} alt={track?.title || "No track"} iconClassName="h-20 w-20 text-zinc-700" />
@@ -164,12 +168,21 @@ export function HomePlayerView({
         </div>
 
         <div className="mt-7 text-center">
-          <h2 className="line-clamp-2 text-2xl font-black leading-tight text-white">{track?.title || t("player.noTrack")}</h2>
+          <h2 className="line-clamp-2 text-xl font-black leading-tight text-white">{track?.title || t("player.noTrack")}</h2>
           <p className="mt-1 truncate text-sm text-[var(--ep-text-secondary)]">{track?.artist || t("player.addMusic")}</p>
-          {track && <div className="mt-4"><AudioQualityBadge bitDepth={track.bitDepth} sampleRate={track.sampleRate} bitrate={track.bitrate} isHiRes={track.isHiRes} /></div>}
+          {track && (
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+              {track.isHiRes && (
+                <span className="quality-chip flex items-center rounded-md px-2 py-1">
+                  <img src={hiresAudioBadgeUrl} alt="Hi-Res Audio" className="h-5 w-auto object-contain" />
+                </span>
+              )}
+              <AudioQualityBadge bitDepth={track.bitDepth} sampleRate={track.sampleRate} bitrate={track.bitrate} isHiRes={false} />
+            </div>
+          )}
         </div>
 
-        <div className="mt-6">
+        <div className="mt-4">
           <input
             type="range"
             min={0}
@@ -185,20 +198,23 @@ export function HomePlayerView({
           </div>
         </div>
 
-        <div className="mt-6 flex items-center justify-center gap-8">
+        <div className="mt-5 flex items-center justify-center gap-8">
           <button onClick={queue.previousTrack} disabled={!track} className="text-[var(--ep-text-secondary)] disabled:opacity-30"><SkipBack className="h-7 w-7" fill="currentColor" /></button>
-          <button onClick={audioProcessor.isPlaying ? audioProcessor.pause : audioProcessor.play} disabled={!track} className="hardware-button flex h-20 w-20 items-center justify-center rounded-full text-white disabled:opacity-40">
-            {audioProcessor.isPlaying ? <Pause className="h-8 w-8" fill="currentColor" /> : <Play className="ml-1 h-9 w-9" fill="currentColor" />}
+          <button onClick={audioProcessor.isPlaying ? audioProcessor.pause : audioProcessor.play} disabled={!track} className="hardware-button flex h-16 w-16 items-center justify-center rounded-full text-white disabled:opacity-40">
+            {audioProcessor.isPlaying ? <Pause className="h-7 w-7" fill="currentColor" /> : <Play className="ml-1 h-8 w-8" fill="currentColor" />}
           </button>
           <button onClick={queue.nextTrack} disabled={!track} className="text-[var(--ep-text-secondary)] disabled:opacity-30"><SkipForward className="h-7 w-7" fill="currentColor" /></button>
         </div>
 
-        <div className="mx-auto mt-6 flex w-full max-w-sm items-center gap-3 rounded-2xl border border-[var(--ep-border)] bg-[#090909] px-4 py-3">
-          <span className="h-2 w-2 rounded-full bg-[var(--ep-red)] shadow-[0_0_9px_rgba(255,16,42,0.9)]" />
-          <div className="min-w-0 flex-1">
-            <p className="premium-title text-[10px] font-black text-white">Epicenter Engine Active</p>
-            <div className="mt-1 h-1 overflow-hidden rounded-full bg-[#1d1d1d]"><div className="h-full bg-[var(--ep-red)] transition-all" style={{ width: `${Math.max(6, progress)}%` }} /></div>
+        <div className="mx-auto mt-5 w-full max-w-sm rounded-2xl border border-[var(--ep-border)] bg-[#090909] px-3 py-2.5">
+          <div className="mb-2 flex items-center gap-2">
+            <span className={`h-2 w-2 rounded-full ${epicenterEnabled ? "bg-[var(--ep-red)] shadow-[0_0_9px_rgba(255,16,42,0.9)]" : "bg-zinc-700"}`} />
+            <p className="premium-title text-[10px] font-black text-white">Epicenter Engine {epicenterEnabled ? "Active" : "Standby"}</p>
           </div>
+          <AudioSpectrumMeter
+            active={Boolean(track && audioProcessor.isPlaying && epicenterEnabled)}
+            getAnalyserNode={getAnalyserNode}
+          />
         </div>
       </div>
     </div>
