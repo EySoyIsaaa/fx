@@ -63,15 +63,6 @@ export function HomeDspView({
               />
             ))}
           </div>
-          <div className="flex items-center gap-2 text-[var(--ep-text-secondary)]">
-            <ChevronLeft className="h-5 w-5" />
-            <ChevronRight className="h-5 w-5" />
-          </div>
-        </div>
-        <div className="flex items-center justify-center gap-2">
-          {presets.map((preset) => (
-            <span key={preset} className={`h-1.5 rounded-full ${preset === "Deep" ? "w-7 bg-[var(--ep-red)]" : "w-1.5 bg-[var(--ep-border)]"}`} />
-          ))}
         </div>
       </section>
 
@@ -83,24 +74,16 @@ export function HomeDspView({
         ))}
       </section>
 
-      <section className="mt-5 grid grid-cols-1 gap-3">
-        <button onClick={onOpenEq} className="premium-card flex items-center gap-4 rounded-3xl p-5 text-left red-glow-subtle">
-          <div className="flex h-14 w-14 flex-none items-center justify-center rounded-2xl border border-[rgba(255,16,42,0.5)] bg-black">
-            <SlidersHorizontal className="h-7 w-7 text-[var(--ep-red)]" />
-          </div>
-          <div>
-            <p className="premium-title text-xl font-black text-white">ECUALIZADOR</p>
-            <p className="mt-1 text-xs text-[var(--ep-text-muted)]">Curva, faders y Q factor</p>
-          </div>
+      <section className="mt-4 grid grid-cols-2 gap-3">
+        <button onClick={onOpenEq} className="premium-card rounded-3xl p-5 text-left min-h-28">
+          <SlidersHorizontal className="mb-3 h-8 w-8 text-[var(--ep-red)]" />
+          <p className="premium-title text-base font-black text-white">ECUALIZADOR</p>
+          <p className="mt-1 text-xs font-semibold text-[var(--ep-text-muted)]">Curva DSP, faders y Q factor</p>
         </button>
-        <button onClick={onOpenFx} className="premium-card flex items-center gap-4 rounded-3xl p-5 text-left">
-          <div className="flex h-14 w-14 flex-none items-center justify-center rounded-2xl border border-[rgba(255,16,42,0.5)] bg-black">
-            <Waves className="h-7 w-7 text-[var(--ep-red)]" />
-          </div>
-          <div>
-            <p className="premium-title text-xl font-black text-white">EFECTOS</p>
-            <p className="mt-1 text-xs text-[var(--ep-text-muted)]">Boost, enhancer y salida</p>
-          </div>
+        <button onClick={onOpenFx} className="premium-card rounded-3xl p-5 text-left min-h-28">
+          <Waves className="mb-3 h-8 w-8 text-[var(--ep-red)]" />
+          <p className="premium-title text-base font-black text-white">EFECTOS</p>
+          <p className="mt-1 text-xs font-semibold text-[var(--ep-text-muted)]">Rack, enhancer y salida</p>
         </button>
       </section>
 

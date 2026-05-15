@@ -45,16 +45,19 @@
 
 /* EpicenterDSP 7.0 - Premium car-audio graphite/red theme */
 :root {
-  --ep-bg: #050505;
-  --ep-surface: #111111;
-  --ep-surface-elevated: #181818;
-  --ep-graphite: #2a2a2a;
-  --ep-border: #2f2f2f;
+  --ep-bg: #f7f7f7;
+  --ep-surface: #ffffff;
+  --ep-surface-elevated: #f0f0f0;
+  --ep-graphite: #d7d7d7;
+  --ep-border: #cfcfcf;
   --ep-red: #ff102a;
   --ep-red-dark: #8f0012;
-  --ep-text: #f5f5f5;
-  --ep-text-secondary: #a6a6a6;
-  --ep-text-muted: #6f6f6f;
+  --ep-text: #070707;
+  --ep-text-secondary: #303030;
+  --ep-text-muted: #686868;
+  --ep-shell-top: rgba(255, 16, 42, 0.08);
+  --ep-shell-mid: #ffffff;
+  --ep-shell-bottom: #f3f3f3;
 
   --primary: var(--ep-red);
   --primary-foreground: #ffffff;
@@ -66,7 +69,7 @@
   --foreground: var(--ep-text);
   --card: var(--ep-surface);
   --card-foreground: var(--ep-text);
-  --popover: #090909;
+  --popover: #ffffff;
   --popover-foreground: var(--ep-text);
   --muted: var(--ep-surface-elevated);
   --muted-foreground: var(--ep-text-muted);
@@ -80,7 +83,7 @@
   --chart-3: #6f6f6f;
   --chart-4: #2a2a2a;
   --chart-5: #181818;
-  --sidebar: #080808;
+  --sidebar: #ffffff;
   --sidebar-foreground: var(--ep-text);
   --sidebar-primary: var(--ep-red);
   --sidebar-primary-foreground: #ffffff;
@@ -92,6 +95,20 @@
 }
 
 .dark {
+  --ep-bg: #050505;
+  --ep-surface: #111111;
+  --ep-surface-elevated: #181818;
+  --ep-graphite: #2a2a2a;
+  --ep-border: #2f2f2f;
+  --ep-red: #ff102a;
+  --ep-red-dark: #8f0012;
+  --ep-text: #f5f5f5;
+  --ep-text-secondary: #a6a6a6;
+  --ep-text-muted: #6f6f6f;
+  --ep-shell-top: rgba(255, 16, 42, 0.14);
+  --ep-shell-mid: #090909;
+  --ep-shell-bottom: #030303;
+
   --primary: var(--ep-red);
   --primary-foreground: #ffffff;
   --accent: var(--ep-red);
@@ -111,6 +128,10 @@
   --border: var(--ep-border);
   --input: var(--ep-border);
   --ring: rgba(255, 16, 42, 0.32);
+  --sidebar: #080808;
+  --sidebar-foreground: var(--ep-text);
+  --sidebar-accent: var(--ep-surface-elevated);
+  --sidebar-border: var(--ep-border);
 }
 
 @layer base {
@@ -118,7 +139,9 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-black text-white antialiased;
+    @apply antialiased;
+    background: var(--ep-bg);
+    color: var(--ep-text);
     font-family:
       "Inter",
       "Exo 2",
@@ -327,8 +350,9 @@ input[type="range"].progress-slider::-webkit-slider-thumb {
 @layer components {
   .epicenter-shell {
     background:
-      radial-gradient(circle at 50% -12%, rgba(255, 16, 42, 0.14), transparent 35%),
-      linear-gradient(180deg, #090909 0%, var(--ep-bg) 42%, #030303 100%);
+      radial-gradient(circle at 50% -12%, var(--ep-shell-top), transparent 35%),
+      linear-gradient(180deg, var(--ep-shell-mid) 0%, var(--ep-bg) 42%, var(--ep-shell-bottom) 100%);
+    color: var(--ep-text);
   }
 
   .premium-title {
@@ -403,6 +427,7 @@ input[type="range"].progress-slider::-webkit-slider-thumb {
 
 body {
   background: var(--ep-bg);
+  color: var(--ep-text);
 }
 
 ::-webkit-scrollbar-thumb {
@@ -418,77 +443,27 @@ input[type="range"].progress-slider::-webkit-slider-thumb {
   box-shadow: 0 0 12px rgba(255, 16, 42, 0.55);
 }
 
-/* Optional light mode driven by the existing settings toggle. */
-html:not(.dark) {
-  --ep-bg: #f7f7f7;
-  --ep-surface: #ffffff;
-  --ep-surface-elevated: #f0f0f0;
-  --ep-graphite: #d8d8d8;
-  --ep-border: #d0d0d0;
-  --ep-text: #050505;
-  --ep-text-secondary: #303030;
-  --ep-text-muted: #686868;
-  --background: var(--ep-bg);
-  --foreground: var(--ep-text);
-  --card: var(--ep-surface);
-  --card-foreground: var(--ep-text);
-  --popover: #ffffff;
-  --popover-foreground: var(--ep-text);
-  --muted: var(--ep-surface-elevated);
-  --muted-foreground: var(--ep-text-muted);
-  --border: var(--ep-border);
-  --input: var(--ep-border);
-}
 
-html:not(.dark) body,
-html:not(.dark) .epicenter-shell {
-  background:
-    radial-gradient(circle at 50% -12%, rgba(255, 16, 42, 0.09), transparent 34%),
-    linear-gradient(180deg, #ffffff 0%, #f7f7f7 52%, #efefef 100%) !important;
+/* Light mode keeps the red identity while flipping core surfaces/text for the existing toggle. */
+html:not(.dark) .epicenter-shell .bg-black,
+html:not(.dark) .epicenter-shell .bg-\[\#080808\],
+html:not(.dark) .epicenter-shell .bg-\[\#090909\],
+html:not(.dark) .epicenter-shell .bg-\[\#0b0b0b\],
+html:not(.dark) .epicenter-shell .bg-\[\#0d0d0d\],
+html:not(.dark) .epicenter-shell .bg-\[\#101010\],
+html:not(.dark) .epicenter-shell .bg-\[\#111\],
+html:not(.dark) .epicenter-shell .bg-\[\#111111\] {
+  background-color: var(--ep-surface) !important;
+}
+html:not(.dark) .epicenter-shell .text-white {
   color: var(--ep-text) !important;
 }
-
-html:not(.dark) .epicenter-shell .text-white,
-html:not(.dark) .epicenter-shell .text-zinc-200,
-html:not(.dark) .epicenter-shell .text-zinc-300,
-html:not(.dark) .epicenter-shell .text-zinc-400 {
-  color: var(--ep-text) !important;
-}
-
+html:not(.dark) .epicenter-shell .text-zinc-400,
 html:not(.dark) .epicenter-shell .text-zinc-500,
-html:not(.dark) .epicenter-shell .text-zinc-600,
-html:not(.dark) .epicenter-shell .text-zinc-700,
-html:not(.dark) .epicenter-shell .text-zinc-800 {
+html:not(.dark) .epicenter-shell .text-zinc-600 {
   color: var(--ep-text-muted) !important;
 }
-
-html:not(.dark) .epicenter-shell .bg-black,
-html:not(.dark) .epicenter-shell [class*="bg-[#0"],
-html:not(.dark) .epicenter-shell [class*="bg-[#1"],
-html:not(.dark) .epicenter-shell [class*="bg-zinc-8"],
-html:not(.dark) .epicenter-shell [class*="bg-zinc-9"] {
-  background-color: #ffffff !important;
-}
-
-html:not(.dark) .premium-card,
-html:not(.dark) .card-elevated {
-  background:
-    linear-gradient(145deg, rgba(255,255,255,0.95), rgba(238,238,238,0.82)),
-    linear-gradient(180deg, #ffffff, #eeeeee) !important;
-  border-color: var(--ep-border) !important;
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.9),
-    0 16px 32px rgba(0,0,0,0.12) !important;
-}
-
-html:not(.dark) .hardware-button {
-  background:
-    radial-gradient(circle at 35% 25%, rgba(255,255,255,0.95), transparent 30%),
-    linear-gradient(145deg, #ffffff, #cfcfcf 78%) !important;
-  color: #050505 !important;
-}
-
-html:not(.dark) .quality-chip {
-  background: linear-gradient(180deg, #ffffff, #f4f4f4) !important;
-  color: #050505 !important;
+html:not(.dark) .premium-card {
+  background: linear-gradient(145deg, rgba(255,255,255,0.92), rgba(245,245,245,0.96));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 12px 26px rgba(0,0,0,0.12);
 }

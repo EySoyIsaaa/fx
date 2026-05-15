@@ -1656,6 +1656,7 @@ export default function Home() {
           seek: audioProcessor.seek,
           pause: audioProcessor.pause,
           play: audioProcessor.play,
+          getAnalyserNode: audioProcessor.getAnalyserNode,
         }}
         draggedIndex={draggedIndex}
         onDraggedIndexChange={setDraggedIndex}
@@ -1664,7 +1665,6 @@ export default function Home() {
         formatTime={formatTime}
         hiresAudioBadgeUrl={hiresAudioBadgeUrl}
         epicenterEnabled={epicenterEnabled}
-        getAnalyserNode={audioProcessor.getAnalyserNode}
       />
 
       {activeTab === "library" && (
