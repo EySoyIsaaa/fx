@@ -1,6 +1,6 @@
 /**
  * Epicenter Hi-Fi - Audio Queue & Library Hook
- * Con persistencia en IndexedDB para que la música no se pierda
+ * Con persistencia nativa SQLite/Room en Android
  * 
  * v1.1.2 - Added duplicate detection
  */
@@ -38,7 +38,7 @@ export interface Track {
   id: string;
   sourceTrackId?: string; // ID real en biblioteca cuando la cola usa IDs temporales
   file?: File;
-  isEphemeral?: boolean; // Disponible solo en esta sesión (fallback si falla IndexedDB)
+  isEphemeral?: boolean; // Disponible solo en esta sesión si no hay URI nativa
   fileName?: string;
   fileType?: string;
   fileSize?: number;
@@ -84,6 +84,7 @@ export interface QueueController {
   currentTrack: Track | null;
   // Funciones de biblioteca
   addToLibrary: (files: File[]) => Promise<ImportResult>;
+  importManualTracksFromNativePicker: () => Promise<ImportResult>;
   addMediaStoreTracks: (tracks: AndroidMusicFile[], getAlbumArtFn?: (albumArtUri: string) => Promise<string | null>) => Promise<ImportResult>;
   reconcileMediaStoreTracks: (tracks: AndroidMusicFile[]) => Promise<{ updated: number; missing: number }>;
   removeFromLibrary: (id: string) => Promise<void>;
@@ -133,12 +134,12 @@ export function useAudioQueue(): QueueController {
   const fileCacheRef = useRef<Map<string, File>>(new Map());
   const lastShuffleSignatureRef = useRef<string | null>(null);
 
-  // Cargar biblioteca desde IndexedDB al iniciar
+  // Cargar biblioteca desde SQLite/Room al iniciar
   useEffect(() => {
     const loadLibrary = async () => {
       try {
         setIsLoading(true);
-        logger.debug('[Library] Loading from IndexedDB...');
+        logger.debug('[Library] Loading from native Room library...');
         
         const tracks: Track[] = [];
         const isAndroid = /android/i.test(navigator.userAgent || '');
@@ -439,7 +440,7 @@ export function useAudioQueue(): QueueController {
         sourceType: 'file',
       };
 
-      // Guardar en IndexedDB (si falla, usar fallback en memoria para no romper reproducción)
+      // En Android no se guardan blobs web: se usa el selector nativo para persistir content:// en Room
       try {
         const audioBlob = await fileToBlob(file);
         await musicLibraryDB.saveTrack(id, {
@@ -493,6 +494,93 @@ export function useAudioQueue(): QueueController {
     };
   }, [extractMetadata]);
 
+
+  const importManualTracksFromNativePicker = useCallback(async (): Promise<ImportResult> => {
+    setImportProgress({
+      isImporting: true,
+      current: 0,
+      total: 1,
+      currentFileName: 'Selector nativo',
+    });
+
+    try {
+      const result = await musicLibraryDB.importManualTracksFromPicker();
+      const importedTracks: Track[] = result.records.map((metadata) => ({
+        id: metadata.id,
+        fileName: metadata.fileName,
+        fileType: metadata.fileType,
+        fileSize: metadata.fileSize,
+        title: metadata.title,
+        artist: metadata.artist,
+        duration: metadata.duration,
+        coverUrl: metadata.coverBase64 || metadata.albumArtUri,
+        bitDepth: metadata.bitDepth,
+        sampleRate: metadata.sampleRate,
+        bitrate: metadata.bitrate,
+        isHiRes: metadata.isHiRes,
+        sourceUri: metadata.sourceUri,
+        sourceType: metadata.sourceType,
+        albumId: metadata.albumId,
+        albumArtUri: metadata.albumArtUri,
+        mediaStoreId: metadata.mediaStoreId,
+        dateModified: metadata.dateModified,
+        sourceVersionKey: metadata.sourceVersionKey,
+        unavailable: metadata.unavailable,
+        lastValidatedAt: metadata.lastValidatedAt,
+      }));
+
+      if (importedTracks.length > 0) {
+        setLibrary((prev) => {
+          const byId = new Map(prev.map((track) => [track.id, track]));
+          for (const track of importedTracks) {
+            byId.set(track.id, track);
+          }
+          return Array.from(byId.values());
+        });
+      } else {
+        const page = await musicLibraryDB.getTrackMetadataPage({ page: 1, pageSize: 100, sortBy: 'dateModified', sortDir: 'desc' });
+        setLibrary((prev) => {
+          const byId = new Map(prev.map((track) => [track.id, track]));
+          for (const metadata of page.records) {
+            byId.set(metadata.id, {
+              id: metadata.id,
+              fileName: metadata.fileName,
+              fileType: metadata.fileType,
+              fileSize: metadata.fileSize,
+              title: metadata.title,
+              artist: metadata.artist,
+              duration: metadata.duration,
+              coverUrl: metadata.coverBase64 || metadata.albumArtUri,
+              bitDepth: metadata.bitDepth,
+              sampleRate: metadata.sampleRate,
+              bitrate: metadata.bitrate,
+              isHiRes: metadata.isHiRes,
+              sourceUri: metadata.sourceUri,
+              sourceType: metadata.sourceType,
+              albumId: metadata.albumId,
+              albumArtUri: metadata.albumArtUri,
+              mediaStoreId: metadata.mediaStoreId,
+              dateModified: metadata.dateModified,
+              sourceVersionKey: metadata.sourceVersionKey,
+              unavailable: metadata.unavailable,
+              lastValidatedAt: metadata.lastValidatedAt,
+            });
+          }
+          return Array.from(byId.values());
+        });
+      }
+
+      return { added: result.changed, duplicates: [] };
+    } finally {
+      setImportProgress({
+        isImporting: false,
+        current: 0,
+        total: 0,
+        currentFileName: '',
+      });
+    }
+  }, []);
+
   const addMediaStoreTracks = useCallback(async (
     tracks: AndroidMusicFile[],
     getAlbumArtFn?: (albumArtUri: string) => Promise<string | null>
@@ -510,7 +598,7 @@ export function useAudioQueue(): QueueController {
       currentFileName: tracks[0]?.name || '',
     });
 
-    // Carga única para deduplicación (evita una consulta IndexedDB por track)
+    // Carga única para deduplicación (evita una consulta nativa por track)
     const existingFingerprints = new Set<string>();
     try {
       const existingTracks = await musicLibraryDB.getAllTrackMetadata();
@@ -813,7 +901,7 @@ export function useAudioQueue(): QueueController {
   }, [library]);
 
   const removeFromLibrary = useCallback(async (id: string) => {
-    // Eliminar de IndexedDB
+    // Eliminar de SQLite/Room
     try {
       await musicLibraryDB.deleteTrack(id);
       // Also clean up playlist references
@@ -1113,6 +1201,7 @@ export function useAudioQueue(): QueueController {
     currentTrackIndex,
     currentTrack,
     addToLibrary,
+    importManualTracksFromNativePicker,
     addMediaStoreTracks,
     reconcileMediaStoreTracks,
     removeFromLibrary,

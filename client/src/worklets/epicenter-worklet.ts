@@ -30,6 +30,15 @@ const EPICENTER_INTENSITY_HEADROOM = 0.75;
 const EPICENTER_INTENSITY_MAX_SCALE = 0.65;
 const EPICENTER_VOLUME_MAX_SCALE = 0.75;
 const EPICENTER_OUTPUT_TRIM = 0.95;
+const SOFT_CLIP_LIMIT = 3;
+const FINAL_SOFT_CLIP_DRIVE = 0.9;
+const FINAL_SOFT_CLIP_NORM = 1 / (FINAL_SOFT_CLIP_DRIVE * (27 + FINAL_SOFT_CLIP_DRIVE * FINAL_SOFT_CLIP_DRIVE) / (27 + 9 * FINAL_SOFT_CLIP_DRIVE * FINAL_SOFT_CLIP_DRIVE));
+
+const fastSoftClip = (value: number): number => {
+  const x = Math.max(-SOFT_CLIP_LIMIT, Math.min(SOFT_CLIP_LIMIT, value));
+  const x2 = x * x;
+  return x * (27 + x2) / (27 + 9 * x2);
+};
 
 type FilterType = 'lowpass' | 'highpass' | 'bandpass';
 
@@ -254,6 +263,7 @@ class EpicenterProcessor extends AudioWorkletProcessor {
 
   private channels: StereoChannelState[] = [];
   private monoState: MonoDetectorState | null = null;
+  private subBuffer = new Float32Array(128);
   private lastSweepFreq = -1;
   private lastWidth = -1;
 
@@ -408,7 +418,10 @@ class EpicenterProcessor extends AudioWorkletProcessor {
     const monoState = this.monoState!;
 
     const blockSize = input[0].length;
-    const subBuffer = new Float32Array(blockSize);
+    if (this.subBuffer.length < blockSize) {
+      this.subBuffer = new Float32Array(blockSize);
+    }
+    const subBuffer = this.subBuffer;
 
     // 100% visible en la perilla equivale al antiguo 75% efectivo para evitar distorsión de voz.
     const intensityRawNorm = Math.max(0, Math.min(100, intensity)) / 100;
@@ -427,8 +440,8 @@ class EpicenterProcessor extends AudioWorkletProcessor {
     const gateHoldSamples = Math.floor(sampleRate * (0.025 + intensityNorm * 0.06));
 
     for (let i = 0; i < blockSize; i++) {
-      const left = input[0][i] ?? 0;
-      const right = (numChannels > 1 ? input[1][i] : left) ?? left;
+      const left = input[0][i] || 0;
+      const right = numChannels > 1 ? (input[1][i] || 0) : left;
 
       const mono = this.denormalFloor((left + right) * 0.5);
       const diff = this.denormalFloor((left - right) * 0.5);
@@ -464,8 +477,9 @@ class EpicenterProcessor extends AudioWorkletProcessor {
 
       const holdFactor = monoState.holdSamples > 0 ? 1 : 0;
       const remixGate = Math.max(gateValue, holdFactor * 0.45);
-      const leveledSynth = monoState.synthLevelEnv.process(synth) * Math.sign(synth);
-      const protectedSynth = Math.tanh((synth * 0.65 + leveledSynth * 0.35) * 1.92) * 0.72;
+      const synthLevel = monoState.synthLevelEnv.process(synth);
+      const leveledSynth = synth < 0 ? -synthLevel : synth > 0 ? synthLevel : 0;
+      const protectedSynth = fastSoftClip((synth * 0.65 + leveledSynth * 0.35) * 1.92) * 0.72;
 
       subBuffer[i] = this.denormalFloor(protectedSynth * synthAmount * remixGate);
     }
@@ -507,8 +521,8 @@ class EpicenterProcessor extends AudioWorkletProcessor {
         const protectionGain = 0.94 + voiceProtection * 0.06;
         mixed *= volumeGain * protectionGain * EPICENTER_OUTPUT_TRIM;
 
-        // Soft clip final más relajado para no raspar la voz.
-        mixed = Math.tanh(mixed * 0.9) / Math.tanh(0.9);
+        // Soft clip final con aproximación sin Math.tanh para mantener el worklet estable en Android.
+        mixed = fastSoftClip(mixed * FINAL_SOFT_CLIP_DRIVE) * FINAL_SOFT_CLIP_NORM;
         mixed = state.outputDcHighpass.process(mixed);
 
         outChan[i] = this.denormalFloor(mixed);

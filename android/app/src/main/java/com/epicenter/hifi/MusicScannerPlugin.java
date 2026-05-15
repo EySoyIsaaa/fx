@@ -2,6 +2,7 @@ package com.epicenter.hifi;
 
 import android.Manifest;
 import android.content.ContentResolver;
+import android.content.Intent;
 import android.content.ContentUris;
 import android.database.Cursor;
 import android.media.MediaExtractor;
@@ -9,6 +10,7 @@ import android.media.MediaFormat;
 import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.Build;
+import android.os.PowerManager;
 import android.provider.MediaStore;
 import android.util.Base64;
 import androidx.core.content.ContextCompat;
@@ -19,6 +21,7 @@ import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
@@ -72,9 +75,11 @@ public class MusicScannerPlugin extends Plugin {
   private static final int AUDIO_BUFFER_SIZE = 512 * 1024;
 
   private final ExecutorService audioExecutor = Executors.newSingleThreadExecutor();
+  private final ExecutorService dbExecutor = Executors.newSingleThreadExecutor();
   private volatile ServerSocket audioServerSocket;
   private volatile int audioServerPort = -1;
   private final String audioSessionToken = UUID.randomUUID().toString();
+  private PowerManager.WakeLock playbackWakeLock;
 
   private static class AudioFormatInfo {
     Integer bitDepth;
@@ -359,6 +364,67 @@ public class MusicScannerPlugin extends Plugin {
     }
   }
 
+
+  @PluginMethod
+  public void pickManualAudioTracks(PluginCall call) {
+    Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+    intent.addCategory(Intent.CATEGORY_OPENABLE);
+    intent.setType("audio/*");
+    intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+    startActivityForResult(call, intent, "pickManualAudioTracksResult");
+  }
+
+  @ActivityCallback
+  private void pickManualAudioTracksResult(PluginCall call, androidx.activity.result.ActivityResult result) {
+    if (call == null) return;
+    if (result.getResultCode() != android.app.Activity.RESULT_OK || result.getData() == null) {
+      dbExecutor.execute(() -> {
+        try {
+          JSObject out = new JSObject();
+          out.put("count", dao().countAll());
+          out.put("changed", 0);
+          out.put("records", new JSArray());
+          out.put("success", true);
+          call.resolve(out);
+        } catch (Exception e) {
+          call.reject("Error finishing manual picker: " + e.getMessage(), e);
+        }
+      });
+      return;
+    }
+
+    Intent data = result.getData();
+    List<Uri> uris = new ArrayList<>();
+    if (data.getClipData() != null) {
+      for (int i = 0; i < data.getClipData().getItemCount(); i++) {
+        uris.add(data.getClipData().getItemAt(i).getUri());
+      }
+    } else if (data.getData() != null) {
+      uris.add(data.getData());
+    }
+
+    int persistableFlags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+    if ((persistableFlags & Intent.FLAG_GRANT_READ_URI_PERMISSION) == 0) {
+      persistableFlags |= Intent.FLAG_GRANT_READ_URI_PERMISSION;
+    }
+    final int finalPersistableFlags = persistableFlags;
+    dbExecutor.execute(() -> {
+      try {
+        JSArray imported = importManualUris(uris, finalPersistableFlags);
+        JSObject out = new JSObject();
+        out.put("count", dao().countAll());
+        out.put("changed", imported.length());
+        out.put("records", imported);
+        out.put("success", true);
+        call.resolve(out);
+      } catch (Exception e) {
+        android.util.Log.e("MusicScanner", "manualImportFailed", e);
+        call.reject("Error importing picked tracks: " + e.getMessage(), e);
+      }
+    });
+  }
+
   @PluginMethod
   public void importManualTracks(PluginCall call) {
     JSArray items = call.getArray("items");
@@ -367,11 +433,10 @@ public class MusicScannerPlugin extends Plugin {
       return;
     }
 
-    try {
-      migrateSharedPrefsToRoomIfNeeded();
-      long now = System.currentTimeMillis() / 1000L;
-      AtomicInteger changed = new AtomicInteger(0);
-      AppDatabase.get(getContext()).runInTransaction(() -> {
+    dbExecutor.execute(() -> {
+      try {
+        migrateSharedPrefsToRoomIfNeeded();
+        List<Uri> uris = new ArrayList<>();
         for (int i = 0; i < items.length(); i++) {
           JSONObject obj;
           try {
@@ -380,29 +445,65 @@ public class MusicScannerPlugin extends Plugin {
             continue;
           }
           String contentUri = obj.optString("contentUri", "");
-          if (contentUri == null || contentUri.isEmpty()) continue;
-          JSObject track = buildTrackFromUri(Uri.parse(contentUri));
-          if (track != null) {
-            TrackEntity e = toEntity(track, now);
-            e.sourceType = "manual-uri";
-            e.mediaStoreId = null;
-            e.scanCompleteness = "complete";
-            dao().upsert(e);
-            changed.incrementAndGet();
-          }
+          if (contentUri != null && !contentUri.isEmpty()) uris.add(Uri.parse(contentUri));
         }
-      });
-      JSObject result = new JSObject();
-      result.put("count", dao().countAll());
-      result.put("changed", changed.get());
-      result.put("success", true);
-      call.resolve(result);
-    } catch (Exception e) {
-      call.reject("Error importing manual tracks: " + e.getMessage(), e);
-    }
+        JSArray imported = importManualUris(uris, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        JSObject result = new JSObject();
+        result.put("count", dao().countAll());
+        result.put("changed", imported.length());
+        result.put("records", imported);
+        result.put("success", true);
+        call.resolve(result);
+      } catch (Exception e) {
+        android.util.Log.e("MusicScanner", "manualImportFailed", e);
+        call.reject("Error importing manual tracks: " + e.getMessage(), e);
+      }
+    });
   }
 
 
+
+
+  private JSArray importManualUris(List<Uri> uris, int persistableFlags) throws Exception {
+    migrateSharedPrefsToRoomIfNeeded();
+    long now = System.currentTimeMillis() / 1000L;
+    JSArray imported = new JSArray();
+    AppDatabase.get(getContext()).runInTransaction(() -> {
+      for (Uri uri : uris) {
+        if (uri == null) continue;
+        if ("content".equalsIgnoreCase(uri.getScheme())) {
+          try {
+            getContext().getContentResolver().takePersistableUriPermission(uri, persistableFlags);
+            android.util.Log.i("MusicScanner", "manualImportPersistedUriPermission uri=" + uri + " flags=" + persistableFlags);
+          } catch (Exception permissionError) {
+            android.util.Log.w("MusicScanner", "persistUriPermissionFailed uri=" + uri + " flags=" + persistableFlags + " reason=" + permissionError.getMessage());
+            if ((persistableFlags & Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0 && persistableFlags != Intent.FLAG_GRANT_READ_URI_PERMISSION) {
+              try {
+                getContext().getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                android.util.Log.i("MusicScanner", "manualImportPersistedUriPermissionReadOnly uri=" + uri);
+              } catch (Exception readOnlyPermissionError) {
+                android.util.Log.w("MusicScanner", "persistUriPermissionReadOnlyFailed uri=" + uri + " reason=" + readOnlyPermissionError.getMessage());
+              }
+            }
+          }
+        }
+
+        JSObject track = buildTrackFromUri(uri);
+        if (track == null) continue;
+        TrackEntity e = toEntity(track, now);
+        e.sourceType = "manual-uri";
+        e.mediaStoreId = null;
+        e.scanCompleteness = "complete";
+        e.createdAt = now;
+        e.updatedAt = now;
+        e.lastSeenAt = now;
+        dao().upsert(e);
+        android.util.Log.i("MusicScanner", "manualImportRoomUpsert stableId=" + e.stableId + " sourceType=" + e.sourceType + " sourceUri=" + e.sourceUri + " title=" + e.title);
+        imported.put(toJs(e));
+      }
+    });
+    return imported;
+  }
 
   @PluginMethod
   public void deleteTrackById(PluginCall call) {
@@ -495,8 +596,58 @@ public class MusicScannerPlugin extends Plugin {
     }
   }
 
+
+  @PluginMethod
+  public void acquirePlaybackWakeLock(PluginCall call) {
+    String trackId = call.getString("trackId", "unknown");
+    try {
+      if (playbackWakeLock == null) {
+        PowerManager powerManager = (PowerManager) getContext().getSystemService(android.content.Context.POWER_SERVICE);
+        playbackWakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "EpicenterHiFi:Playback");
+        playbackWakeLock.setReferenceCounted(false);
+      }
+      boolean wasHeld = playbackWakeLock.isHeld();
+      if (!wasHeld) {
+        playbackWakeLock.acquire(6 * 60 * 60 * 1000L);
+      }
+      boolean isHeld = playbackWakeLock.isHeld();
+      android.util.Log.i("MusicScanner", "playbackWakeLockAcquire trackId=" + trackId + " wasHeld=" + wasHeld + " isHeld=" + isHeld);
+      JSObject result = new JSObject();
+      result.put("held", isHeld);
+      result.put("wasHeld", wasHeld);
+      call.resolve(result);
+    } catch (Exception e) {
+      call.reject("Error acquiring playback wake lock: " + e.getMessage(), e);
+    }
+  }
+
+  @PluginMethod
+  public void releasePlaybackWakeLock(PluginCall call) {
+    String reason = call.getString("reason", "unknown");
+    String trackId = call.getString("trackId", "unknown");
+    try {
+      boolean wasHeld = releasePlaybackWakeLockInternal(reason, trackId);
+      JSObject result = new JSObject();
+      result.put("held", playbackWakeLock != null && playbackWakeLock.isHeld());
+      result.put("wasHeld", wasHeld);
+      call.resolve(result);
+    } catch (Exception e) {
+      call.reject("Error releasing playback wake lock: " + e.getMessage(), e);
+    }
+  }
+
+  private boolean releasePlaybackWakeLockInternal(String reason, String trackId) {
+    boolean wasHeld = playbackWakeLock != null && playbackWakeLock.isHeld();
+    if (wasHeld) {
+      playbackWakeLock.release();
+    }
+    android.util.Log.i("MusicScanner", "playbackWakeLockRelease reason=" + reason + " trackId=" + trackId + " wasHeld=" + wasHeld + " isHeld=" + (playbackWakeLock != null && playbackWakeLock.isHeld()));
+    return wasHeld;
+  }
+
   @Override
   protected void handleOnDestroy() {
+    releasePlaybackWakeLockInternal("plugin-destroy", "unknown");
     shutdownAudioServer();
     super.handleOnDestroy();
   }
@@ -517,6 +668,12 @@ public class MusicScannerPlugin extends Plugin {
       audioExecutor.shutdownNow();
     } catch (Exception e) {
       android.util.Log.w("MusicScanner", "audioExecutorShutdownFailed " + e.getMessage());
+    }
+
+    try {
+      dbExecutor.shutdownNow();
+    } catch (Exception e) {
+      android.util.Log.w("MusicScanner", "dbExecutorShutdownFailed " + e.getMessage());
     }
   }
 
@@ -544,7 +701,7 @@ public class MusicScannerPlugin extends Plugin {
         id,
         track.optString("sourceVersionKey", id),
         track.has("size") ? track.optLong("size") : null,
-        true
+        false
       );
       call.resolve(result);
     } catch (Exception e) {
@@ -563,7 +720,10 @@ public class MusicScannerPlugin extends Plugin {
     String sourceVersionKey = call.getString("sourceVersionKey");
     Long expectedSize = call.getLong("expectedSize");
     Boolean allowStreamingOpt = call.getBoolean("allowStreaming");
-    boolean allowStreaming = allowStreamingOpt == null ? true : allowStreamingOpt.booleanValue();
+    boolean allowStreaming = false;
+    if (Boolean.TRUE.equals(allowStreamingOpt)) {
+      android.util.Log.i("MusicScanner", "streamingOptionIgnored allowStreamingRequested=true forced=false");
+    }
     
     if (contentUri == null || contentUri.isEmpty()) {
       call.reject("contentUri is required");
@@ -623,6 +783,7 @@ public class MusicScannerPlugin extends Plugin {
       if (linked == null) linked = dao().getByMediaStoreId(trackId);
       if (linked == null) linked = dao().findBySourceUri(contentUri);
       boolean hasValidSourceUri = contentUri != null && !contentUri.trim().isEmpty();
+      String sourceUriScheme = uri.getScheme() != null ? uri.getScheme() : "unknown";
       boolean linkedMatchesRequested =
         linked != null &&
         hasValidSourceUri &&
@@ -649,6 +810,8 @@ public class MusicScannerPlugin extends Plugin {
           fast.put("cached", true);
           fast.put("cacheKey", "linked-fast-path");
           fast.put("resolvedStableId", linked.stableId);
+          fast.put("playbackSource", "cache-local-linked");
+          fast.put("sourceUriScheme", sourceUriScheme);
           fast.put("playbackResolveTimeMs", System.currentTimeMillis() - resolveStart);
           fast.put("cacheHit", true);
           fast.put("fastPath", true);
@@ -656,7 +819,7 @@ public class MusicScannerPlugin extends Plugin {
           fast.put("copiedBytes", 0);
           fast.put("bufferSize", AUDIO_BUFFER_SIZE);
           fast.put("rejectReason", "");
-          android.util.Log.i("MusicScanner", "playbackResolvedUrl=" + linkedCache.getAbsolutePath() + " playbackResolveTimeMs=" + (System.currentTimeMillis() - resolveStart) + " cacheHit=true copyTimeMs=0 copiedBytes=0 bufferSize=" + AUDIO_BUFFER_SIZE + " fastPath=true rejectReason=");
+          android.util.Log.i("MusicScanner", "playbackSource=cache-local-linked sourceUriScheme=" + sourceUriScheme + " playbackResolvedUrl=" + linkedCache.getAbsolutePath() + " playbackResolveTimeMs=" + (System.currentTimeMillis() - resolveStart) + " cacheHit=true copyTimeMs=0 copiedBytes=0 bufferSize=" + AUDIO_BUFFER_SIZE + " fastPath=true rejectReason=");
           return fast;
         }
         android.util.Log.w("MusicScanner", "linkedCacheRejected rejectReason=" + rejectReason + " requested=" + contentUri + " linked=" + linked.sourceUri + " linkedStableId=" + linked.stableId);
@@ -691,6 +854,8 @@ public class MusicScannerPlugin extends Plugin {
         result.put("cached", true);
         result.put("cacheKey", cacheHash);
         result.put("resolvedStableId", stableForCache);
+        result.put("playbackSource", "cache-local");
+        result.put("sourceUriScheme", sourceUriScheme);
         if (linkedMatchesRequested && linked != null) {
           dao().updateCachePaths(linked.stableId, outputFile.getAbsolutePath(), contentUri, System.currentTimeMillis() / 1000L);
         }
@@ -701,7 +866,7 @@ public class MusicScannerPlugin extends Plugin {
         result.put("copiedBytes", 0);
         result.put("bufferSize", AUDIO_BUFFER_SIZE);
         result.put("rejectReason", "");
-        android.util.Log.i("MusicScanner", "playbackResolvedUrl=" + outputFile.getAbsolutePath() + " playbackResolveTimeMs=" + (System.currentTimeMillis() - resolveStart) + " cacheHit=true copyTimeMs=0 copiedBytes=0 bufferSize=" + AUDIO_BUFFER_SIZE + " fastPath=true rejectReason=");
+        android.util.Log.i("MusicScanner", "playbackSource=cache-local sourceUriScheme=" + sourceUriScheme + " playbackResolvedUrl=" + outputFile.getAbsolutePath() + " playbackResolveTimeMs=" + (System.currentTimeMillis() - resolveStart) + " cacheHit=true copyTimeMs=0 copiedBytes=0 bufferSize=" + AUDIO_BUFFER_SIZE + " fastPath=true rejectReason=");
         return result;
         }
       }
@@ -717,6 +882,8 @@ public class MusicScannerPlugin extends Plugin {
           stream.put("cached", false);
           stream.put("cacheKey", cacheHash);
           stream.put("resolvedStableId", linked.stableId);
+          stream.put("playbackSource", "localhost-stream");
+          stream.put("sourceUriScheme", sourceUriScheme);
           stream.put("playbackResolveTimeMs", System.currentTimeMillis() - resolveStart);
           stream.put("cacheHit", false);
           stream.put("fastPath", true);
@@ -727,12 +894,14 @@ public class MusicScannerPlugin extends Plugin {
           stream.put("stableIdMatches", true);
           stream.put("audioServerPort", audioServerPort);
           stream.put("rejectReason", "streaming_no_cache");
-          android.util.Log.i("MusicScanner", "playbackResolvedUrl=" + streamUrl + " playbackResolveTimeMs=" + (System.currentTimeMillis() - resolveStart) + " cacheHit=false copyTimeMs=0 copiedBytes=0 bufferSize=" + AUDIO_BUFFER_SIZE + " fastPath=true rejectReason=streaming_no_cache sourceUriMatches=true stableIdMatches=true audioServerPort=" + audioServerPort);
+          android.util.Log.i("MusicScanner", "playbackSource=localhost-stream sourceUriScheme=" + sourceUriScheme + " playbackResolvedUrl=" + streamUrl + " playbackResolveTimeMs=" + (System.currentTimeMillis() - resolveStart) + " cacheHit=false copyTimeMs=0 copiedBytes=0 bufferSize=" + AUDIO_BUFFER_SIZE + " fastPath=true rejectReason=streaming_no_cache sourceUriMatches=true stableIdMatches=true audioServerPort=" + audioServerPort);
           return stream;
         }
         android.util.Log.w("MusicScanner", "streamingRejected reason=audio_server_not_active stableId=" + linked.stableId + " sourceUri=" + contentUri);
       } else if (allowStreaming) {
         android.util.Log.w("MusicScanner", "streamingRejected reason=guards_failed hasValidSourceUri=" + hasValidSourceUri + " sourceUriMatches=" + linkedMatchesRequested + " stableIdMatches=" + linkedIdMatchesRequested + " trackId=" + trackId + " linkedStableId=" + (linked != null ? linked.stableId : ""));
+      } else {
+        android.util.Log.i("MusicScanner", "streamingDisabled allowStreaming=false trackId=" + trackId + " sourceUriScheme=" + sourceUriScheme + " playbackWillUse=cache-local");
       }
       
       // Copiar archivo desde content:// a caché (1 retry simple)
@@ -798,6 +967,8 @@ public class MusicScannerPlugin extends Plugin {
       result.put("cached", false);
       result.put("cacheKey", cacheHash);
       result.put("resolvedStableId", stableForCache);
+      result.put("playbackSource", "cache-local-copy");
+      result.put("sourceUriScheme", sourceUriScheme);
       if (linkedMatchesRequested && linked != null) {
         dao().updateCachePaths(linked.stableId, outputFile.getAbsolutePath(), contentUri, System.currentTimeMillis() / 1000L);
       }
@@ -809,7 +980,7 @@ public class MusicScannerPlugin extends Plugin {
       result.put("copiedBytes", totalBytes);
       result.put("bufferSize", AUDIO_BUFFER_SIZE);
       result.put("rejectReason", "copied_to_cache");
-      android.util.Log.i("MusicScanner", "playbackResolvedUrl=" + outputFile.getAbsolutePath() + " playbackResolveTimeMs=" + (System.currentTimeMillis() - resolveStart) + " cacheHit=false copyTimeMs=" + copyTimeMs + " copiedBytes=" + totalBytes + " bufferSize=" + AUDIO_BUFFER_SIZE + " fastPath=false rejectReason=copied_to_cache");
+      android.util.Log.i("MusicScanner", "playbackSource=cache-local-copy sourceUriScheme=" + sourceUriScheme + " playbackResolvedUrl=" + outputFile.getAbsolutePath() + " playbackResolveTimeMs=" + (System.currentTimeMillis() - resolveStart) + " cacheHit=false copyTimeMs=" + copyTimeMs + " copiedBytes=" + totalBytes + " bufferSize=" + AUDIO_BUFFER_SIZE + " fastPath=false rejectReason=copied_to_cache");
       return result;
   }
 
@@ -1518,15 +1689,38 @@ public class MusicScannerPlugin extends Plugin {
         }
       }
 
+      String title = displayName;
+      String artist = "Unknown Artist";
+      String album = "Unknown Album";
+      long durationSeconds = 0L;
+      MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+      try {
+        retriever.setDataSource(getContext(), uri);
+        String metadataTitle = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE);
+        String metadataArtist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST);
+        String metadataAlbum = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM);
+        String metadataDuration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+        if (metadataTitle != null && !metadataTitle.trim().isEmpty()) title = metadataTitle;
+        if (metadataArtist != null && !metadataArtist.trim().isEmpty()) artist = metadataArtist;
+        if (metadataAlbum != null && !metadataAlbum.trim().isEmpty()) album = metadataAlbum;
+        if (metadataDuration != null && !metadataDuration.trim().isEmpty()) durationSeconds = Long.parseLong(metadataDuration) / 1000L;
+      } catch (Exception ignored) {
+      } finally {
+        try {
+          retriever.release();
+        } catch (Exception ignored) {
+        }
+      }
+
       AudioFormatInfo formatInfo = getAudioFormatInfo(uri);
       JSObject fileObj = new JSObject();
       String id = sha1(uri.toString());
       fileObj.put("id", id);
       fileObj.put("name", displayName);
-      fileObj.put("title", displayName);
-      fileObj.put("artist", "Unknown Artist");
-      fileObj.put("album", "Unknown Album");
-      fileObj.put("duration", 0);
+      fileObj.put("title", title);
+      fileObj.put("artist", artist);
+      fileObj.put("album", album);
+      fileObj.put("duration", durationSeconds);
       fileObj.put("size", size);
       fileObj.put("mimeType", mimeType);
       fileObj.put("contentUri", uri.toString());
