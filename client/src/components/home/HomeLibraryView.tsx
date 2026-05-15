@@ -103,10 +103,10 @@ export function HomeLibraryView({
   hiresLogoUrl,
 }: HomeLibraryViewProps) {
   return (
-    <div className="flex-1 flex flex-col" data-testid="library-view">
-      <header className="flex items-center justify-between px-6 pt-12 pb-4 border-b border-zinc-900">
+    <div className="flex-1 flex flex-col pb-32" data-testid="library-view">
+      <header className="flex items-center justify-between px-5 pt-12 pb-3">
         {libraryView === "main" ? (
-          <h2 className="text-xl font-bold">{t("library.title")}</h2>
+          <div><p className="premium-title text-[10px] font-black text-[var(--ep-red)]">Mobile Library</p><h2 className="premium-title text-2xl font-black text-white">{t("library.title")}</h2></div>
         ) : libraryView === "playlist-detail" && selectedPlaylist ? (
           <button
             onClick={() => {
@@ -143,7 +143,7 @@ export function HomeLibraryView({
           {libraryView === "playlists" && (
             <button
               onClick={onCreatePlaylist}
-              className="p-2 text-zinc-400 hover:text-white"
+              className="hardware-button rounded-full p-2 text-white"
             >
               <Plus className="w-5 h-5" />
             </button>
@@ -153,7 +153,7 @@ export function HomeLibraryView({
               <AndroidMusicImporter onImportTracks={onImportMediaStoreTracks} />
               <button
                 onClick={onOpenFilePicker}
-                className="p-2 text-zinc-400 hover:text-white"
+                className="hardware-button rounded-full p-2 text-white"
               >
                 <Plus className="w-5 h-5" />
               </button>
@@ -161,13 +161,30 @@ export function HomeLibraryView({
           )}
         </div>
       </header>
+      <div className="library-tabs flex gap-2 overflow-x-auto px-4 pb-2 scrollbar-hide">
+        {[
+          ["songs", t("library.songs")],
+          ["albums", t("library.albums")],
+          ["artists", t("library.artists")],
+          ["playlists", t("library.playlists")],
+        ].map(([view, label]) => (
+          <button
+            key={view}
+            aria-pressed={libraryView === view}
+            onClick={() => setLibraryView(view as HomeLibraryViewType)}
+            className="flex-none rounded-full px-4 py-2 text-[10px] font-black uppercase tracking-[0.14em]"
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       <ScrollArea className="flex-1">
         {libraryView === "main" && (
-          <div className="p-4 space-y-2">
+          <div className="p-4 space-y-3">
             {queueLibrary.length > 0 && (
               <button
                 onClick={() => onShufflePlay(queueLibrary)}
-                className="w-full flex items-center gap-4 p-4 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 transition-all mb-4"
+                className="w-full flex items-center gap-4 p-4 rounded-xl premium-card border-[rgba(255,16,42,0.5)] red-glow-subtle transition-all mb-4"
               >
                 <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
                   <Shuffle className="w-6 h-6 text-white" />
@@ -186,9 +203,9 @@ export function HomeLibraryView({
 
             <button
               onClick={() => setLibraryView("playlists")}
-              className="w-full flex items-center gap-4 p-4 rounded-xl bg-zinc-900/50 hover:bg-zinc-900 transition-colors"
+              className="w-full flex items-center gap-4 p-4 rounded-2xl premium-card transition-colors"
             >
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center">
+              <div className="w-12 h-12 rounded-xl bg-[linear-gradient(145deg,#2a2a2a,#080808)] border border-[rgba(255,16,42,0.45)] flex items-center justify-center">
                 <ListMusic className="w-6 h-6 text-white" />
               </div>
               <div className="flex-1 text-left">
@@ -202,9 +219,9 @@ export function HomeLibraryView({
 
             <button
               onClick={() => setLibraryView("songs")}
-              className="w-full flex items-center gap-4 p-4 rounded-xl bg-zinc-900/50 hover:bg-zinc-900 transition-colors"
+              className="w-full flex items-center gap-4 p-4 rounded-2xl premium-card transition-colors"
             >
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-pink-500 to-orange-500 flex items-center justify-center">
+              <div className="w-12 h-12 rounded-xl bg-[linear-gradient(145deg,#2a2a2a,#080808)] border border-[var(--ep-border)] flex items-center justify-center">
                 <Music2 className="w-6 h-6 text-white" />
               </div>
               <div className="flex-1 text-left">
@@ -218,9 +235,9 @@ export function HomeLibraryView({
 
             <button
               onClick={() => setLibraryView("artists")}
-              className="w-full flex items-center gap-4 p-4 rounded-xl bg-zinc-900/50 hover:bg-zinc-900 transition-colors"
+              className="w-full flex items-center gap-4 p-4 rounded-2xl premium-card transition-colors"
             >
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center">
+              <div className="w-12 h-12 rounded-xl bg-[linear-gradient(145deg,#2a2a2a,#080808)] border border-[var(--ep-border)] flex items-center justify-center">
                 <User className="w-6 h-6 text-white" />
               </div>
               <div className="flex-1 text-left">
@@ -236,9 +253,9 @@ export function HomeLibraryView({
 
             <button
               onClick={() => setLibraryView("albums")}
-              className="w-full flex items-center gap-4 p-4 rounded-xl bg-zinc-900/50 hover:bg-zinc-900 transition-colors"
+              className="w-full flex items-center gap-4 p-4 rounded-2xl premium-card transition-colors"
             >
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-green-500 to-teal-500 flex items-center justify-center">
+              <div className="w-12 h-12 rounded-xl bg-[linear-gradient(145deg,#2a2a2a,#080808)] border border-[var(--ep-border)] flex items-center justify-center">
                 <Folder className="w-6 h-6 text-white" />
               </div>
               <div className="flex-1 text-left">
@@ -254,9 +271,9 @@ export function HomeLibraryView({
 
             <button
               onClick={() => setLibraryView("hires")}
-              className="w-full flex items-center gap-4 p-4 rounded-xl bg-zinc-900/50 hover:bg-zinc-900 transition-colors"
+              className="w-full flex items-center gap-4 p-4 rounded-2xl premium-card transition-colors"
             >
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500 to-yellow-500 flex items-center justify-center">
+              <div className="w-12 h-12 rounded-xl bg-[linear-gradient(145deg,#2a2a2a,#080808)] border border-[rgba(255,16,42,0.45)] flex items-center justify-center">
                 <img
                   src={hiresLogoUrl}
                   alt="Hi-Res Audio"
@@ -319,7 +336,7 @@ export function HomeLibraryView({
               playlists.map((playlist) => (
                 <div
                   key={playlist.id}
-                  className="flex items-center gap-4 p-4 rounded-xl bg-zinc-900/50 hover:bg-zinc-900 transition-colors"
+                  className="flex items-center gap-4 p-4 rounded-2xl premium-card transition-colors"
                 >
                   <div
                     className="flex-1 flex items-center gap-4 cursor-pointer"
@@ -328,7 +345,7 @@ export function HomeLibraryView({
                       setLibraryView("playlist-detail");
                     }}
                   >
-                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center overflow-hidden">
+                    <div className="w-12 h-12 rounded-xl bg-[linear-gradient(145deg,#2a2a2a,#080808)] border border-[rgba(255,16,42,0.45)] flex items-center justify-center overflow-hidden">
                       <TrackArtwork
                         src={playlist.tracks[0]?.coverUrl}
                         alt={playlist.name}
@@ -350,7 +367,7 @@ export function HomeLibraryView({
                         event.stopPropagation();
                         onPlayInOrder(playlist.tracks);
                       }}
-                      className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white text-black text-xs font-semibold"
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--ep-red)] text-white text-xs font-semibold"
                     >
                       <Play className="w-3.5 h-3.5" fill="currentColor" />
                       {t("actions.play")}
@@ -392,7 +409,7 @@ export function HomeLibraryView({
           <div className="p-4 space-y-1">
             <button
               onClick={onOpenAddSongsToPlaylist}
-              className="w-full flex items-center gap-4 p-4 rounded-xl bg-zinc-800/50 hover:bg-zinc-800 border-2 border-dashed border-zinc-700 transition-all mb-4"
+              className="w-full flex items-center gap-4 p-4 rounded-2xl bg-[#111] hover:bg-[#181818] border border-dashed border-[var(--ep-border)] transition-all mb-4"
             >
               <div className="w-12 h-12 rounded-xl bg-zinc-700 flex items-center justify-center">
                 <Plus className="w-6 h-6 text-white" />
@@ -411,14 +428,14 @@ export function HomeLibraryView({
               <div className="flex flex-wrap items-center gap-3 mb-4">
                 <button
                   onClick={() => onPlayInOrder(selectedPlaylist.tracks)}
-                  className="flex items-center gap-2 px-5 py-2 rounded-full bg-white text-black font-semibold shadow-sm"
+                  className="flex items-center gap-2 px-5 py-2 rounded-full bg-[var(--ep-red)] text-white font-semibold shadow-sm"
                 >
                   <Play className="w-4 h-4" fill="currentColor" />
                   {t("actions.play")}
                 </button>
                 <button
                   onClick={() => onShufflePlay(selectedPlaylist.tracks)}
-                  className="flex items-center gap-2 px-5 py-2 rounded-full border border-zinc-700 text-white"
+                  className="flex items-center gap-2 px-5 py-2 rounded-full border border-[var(--ep-border)] text-white"
                 >
                   <Shuffle className="w-4 h-4" />
                   {t("library.shuffle")}
@@ -479,14 +496,14 @@ export function HomeLibraryView({
                 <div className="flex flex-wrap items-center gap-3 mb-4">
                   <button
                     onClick={() => onPlayInOrder(sortedSongs)}
-                    className="flex items-center gap-2 px-5 py-2 rounded-full bg-white text-black font-semibold shadow-sm"
+                    className="flex items-center gap-2 px-5 py-2 rounded-full bg-[var(--ep-red)] text-white font-semibold shadow-sm"
                   >
                     <Play className="w-4 h-4" fill="currentColor" />
                     {t("actions.play")}
                   </button>
                   <button
                     onClick={() => onShufflePlay(sortedSongs)}
-                    className="flex items-center gap-2 px-5 py-2 rounded-full border border-zinc-700 text-white"
+                    className="flex items-center gap-2 px-5 py-2 rounded-full border border-[var(--ep-border)] text-white"
                   >
                     <Shuffle className="w-4 h-4" />
                     {t("library.shuffle")}
@@ -502,8 +519,8 @@ export function HomeLibraryView({
                       onClick={() => setSongSort(sortKey)}
                       className={`px-3 py-1 rounded-full text-xs ${
                         songSort === sortKey
-                          ? "bg-white text-black"
-                          : "bg-zinc-900 text-zinc-400"
+                          ? "bg-[var(--ep-red)] text-white"
+                          : "bg-[#0b0b0b] text-[var(--ep-text-secondary)] border border-[var(--ep-border)]"
                       }`}
                     >
                       {sortKey === "default"
@@ -556,14 +573,14 @@ export function HomeLibraryView({
               <div className="flex items-center gap-3 mb-4">
                 <button
                   onClick={() => onPlayInOrder(hiResTracks)}
-                  className="flex items-center gap-2 px-5 py-2 rounded-full bg-white text-black font-semibold shadow-sm"
+                  className="flex items-center gap-2 px-5 py-2 rounded-full bg-[var(--ep-red)] text-white font-semibold shadow-sm"
                 >
                   <Play className="w-4 h-4" fill="currentColor" />
                   {t("actions.play")}
                 </button>
                 <button
                   onClick={() => onShufflePlay(hiResTracks)}
-                  className="flex items-center gap-2 px-5 py-2 rounded-full border border-zinc-700 text-white"
+                  className="flex items-center gap-2 px-5 py-2 rounded-full border border-[var(--ep-border)] text-white"
                 >
                   <Shuffle className="w-4 h-4" />
                   {t("library.shuffle")}
@@ -613,7 +630,7 @@ export function HomeLibraryView({
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => onPlayInOrder(tracks)}
-                      className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white text-black text-xs font-semibold"
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--ep-red)] text-white text-xs font-semibold"
                     >
                       <Play className="w-3.5 h-3.5" fill="currentColor" />
                       {t("actions.play")}
@@ -652,7 +669,7 @@ export function HomeLibraryView({
             {Object.entries(albums).map(([album, tracks]) => (
               <div
                 key={album}
-                className="bg-zinc-900/50 rounded-xl p-3 hover:bg-zinc-900 transition-colors"
+                className="premium-card rounded-2xl p-3 transition-colors"
               >
                 <div
                   className="aspect-square rounded-lg bg-zinc-800 mb-2 overflow-hidden cursor-pointer"

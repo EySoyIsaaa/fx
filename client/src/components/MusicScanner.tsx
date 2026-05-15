@@ -95,7 +95,7 @@ export function MusicScanner({ onScanComplete, onManualImport, isScanning = fals
       <Button
         onClick={handleScanClick}
         disabled={isScanning || scanProgress.isScanning || !isAndroid}
-        className="w-full h-14 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-700 hover:to-fuchsia-700 text-white font-semibold text-lg shadow-lg shadow-violet-500/50 transition-all duration-300 hover:shadow-xl hover:shadow-violet-500/60 hover:scale-[1.02] active:scale-[0.98]"
+        className="w-full h-14 bg-[var(--ep-red)] hover:bg-[var(--ep-red-dark)] text-white font-semibold text-lg shadow-lg shadow-[rgba(255,16,42,0.28)] transition-all duration-300 hover:shadow-xl hover:scale-[1.02] active:scale-[0.98]"
       >
         {scanProgress.isScanning ? (
           <>
@@ -184,13 +184,13 @@ export function MusicScanner({ onScanComplete, onManualImport, isScanning = fals
 
       {/* Mensaje para dispositivos no Android */}
       {!isAndroid && (
-        <div className="flex items-start gap-3 p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg mt-2">
-          <Music2 className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
+        <div className="flex items-start gap-3 p-4 bg-[rgba(255,16,42,0.08)] border border-[rgba(255,16,42,0.24)] rounded-lg mt-2">
+          <Music2 className="w-5 h-5 text-[var(--ep-red)] flex-shrink-0 mt-0.5" />
           <div className="flex-1">
-            <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
+            <p className="text-sm font-medium text-[var(--ep-text-secondary)]">
               {t('library.webVersion', { defaultValue: 'Versión Web' })}
             </p>
-            <p className="text-xs text-blue-600/80 dark:text-blue-400/80 mt-1">
+            <p className="text-xs text-[var(--ep-text-muted)] mt-1">
               {t('library.webVersionMessage', { 
                 defaultValue: 'El escaneo automático solo está disponible en la app de Android. Usa la importación manual para agregar música.' 
               })}

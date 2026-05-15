@@ -1,17 +1,15 @@
 /**
- * Epicenter Hi-Fi - Audio Quality Badge
- * Indicador de calidad de audio con formato numérico consistente
+ * EpicenterDSP 7.0 - hardware-style audio quality badges.
  */
 
-import React from 'react';
-import { formatQualityLabel, isHiResQuality } from '@shared/audioQuality';
+import { formatQualityLabel, isHiResQuality } from "@shared/audioQuality";
 
 interface AudioQualityBadgeProps {
   bitDepth?: number;
   sampleRate?: number;
   bitrate?: number;
   isHiRes?: boolean;
-  compact?: boolean; // Para mostrar en listas
+  compact?: boolean;
 }
 
 export function AudioQualityBadge({
@@ -22,45 +20,47 @@ export function AudioQualityBadge({
   compact = false,
 }: AudioQualityBadgeProps) {
   const detectedHiRes = isHiResQuality(bitDepth, sampleRate);
-  const isHighRes = typeof isHiRes === 'boolean' ? isHiRes : detectedHiRes;
-  const qualityParts = [formatQualityLabel(bitDepth, sampleRate)].filter(Boolean);
+  const isHighRes = typeof isHiRes === "boolean" ? isHiRes : detectedHiRes;
+  const parts = [formatQualityLabel(bitDepth, sampleRate)].filter(Boolean);
 
-  if (typeof bitrate === 'number' && bitrate > 0) {
-    qualityParts.push(`${Math.round(bitrate / 1000)}kbps`);
+  if (typeof bitrate === "number" && bitrate > 0) {
+    parts.push(`${Math.round(bitrate / 1000)}kbps`);
   }
 
-  const qualityLabel = qualityParts.join(' • ');
+  if (!parts.length) return null;
 
-  // Si no hay datos de calidad, no mostrar nada
-  if (!qualityLabel) {
-    return null;
-  }
-
-  // Versión compacta para listas
   if (compact) {
     return (
-      <div
-        className={`inline-flex items-center gap-1 text-[9px] font-medium tracking-wide
-          ${isHighRes ? 'text-amber-500' : 'text-zinc-600'}`}
+      <span
+        className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[8px] font-black tracking-[0.14em] uppercase ${
+          isHighRes
+            ? "border-[rgba(255,16,42,0.55)] text-[var(--ep-red)]"
+            : "border-[var(--ep-border)] text-[var(--ep-text-muted)]"
+        }`}
         data-testid="quality-badge-compact"
       >
-        <span>{qualityLabel.replace('-bit ', 'b/').replace('kHz', 'k')}</span>
-      </div>
+        {parts.join(" • ").replace("-bit ", "b/").replace("kHz", "k")}
+      </span>
     );
   }
 
+  const chips = [
+    isHighRes ? "HI-RES" : "STANDARD",
+    bitDepth ? `${bitDepth} BIT` : null,
+    sampleRate ? `${Math.round(sampleRate / 100) / 10} kHz` : null,
+    bitrate ? `${Math.round(bitrate / 1000)} kbps` : null,
+  ].filter(Boolean);
+
   return (
-    <div
-      className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-bold tracking-wider
-        ${isHighRes
-          ? 'bg-gradient-to-r from-amber-950/60 to-yellow-950/60 border border-amber-500/40'
-          : 'bg-zinc-900/80 border border-zinc-800'
-        }`}
-      data-testid="quality-badge"
-    >
-      <div className={`flex items-center gap-1.5 uppercase ${isHighRes ? 'text-amber-400' : 'text-zinc-500'}`}>
-        <span>{qualityLabel}</span>
-      </div>
+    <div className="flex flex-wrap justify-center gap-2" data-testid="quality-badge">
+      {chips.map((chip) => (
+        <span
+          key={chip}
+          className="quality-chip rounded-md px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.18em]"
+        >
+          {chip}
+        </span>
+      ))}
     </div>
   );
 }
