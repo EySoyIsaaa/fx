@@ -1,3 +1,4 @@
+@import url("https://fonts.googleapis.com/css2?family=Exo+2:wght@500;700;800;900&family=Inter:wght@400;500;600;700;800&family=Orbitron:wght@600;700;800;900&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -42,83 +43,95 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
-/* Epicenter Hi-Fi - Obsidian Theme */
+/* EpicenterDSP 7.0 - Premium car-audio graphite/red theme */
 :root {
-  /* Monochrome palette */
-  --primary: #ffffff;
-  --primary-foreground: #000000;
+  --ep-bg: #f7f7f7;
+  --ep-surface: #ffffff;
+  --ep-surface-elevated: #f0f0f0;
+  --ep-graphite: #d7d7d7;
+  --ep-border: #cfcfcf;
+  --ep-red: #ff102a;
+  --ep-red-dark: #8f0012;
+  --ep-text: #070707;
+  --ep-text-secondary: #303030;
+  --ep-text-muted: #686868;
+  --ep-shell-top: rgba(255, 16, 42, 0.08);
+  --ep-shell-mid: #ffffff;
+  --ep-shell-bottom: #f3f3f3;
 
-  --accent: #e4e4e7;
-  --accent-foreground: #000000;
-
-  --secondary: #27272a;
-  --secondary-foreground: #ffffff;
-
-  /* Background - Pure black */
-  --background: #000000;
-  --foreground: #ffffff;
-
-  /* Card - Dark grey */
-  --card: #121212;
-  --card-foreground: #ffffff;
-
-  /* Popover */
-  --popover: #0a0a0a;
-  --popover-foreground: #ffffff;
-
-  /* Muted */
-  --muted: #18181b;
-  --muted-foreground: #71717a;
-
-  /* Destructive */
+  --primary: var(--ep-red);
+  --primary-foreground: #ffffff;
+  --accent: var(--ep-red);
+  --accent-foreground: #ffffff;
+  --secondary: var(--ep-graphite);
+  --secondary-foreground: var(--ep-text);
+  --background: var(--ep-bg);
+  --foreground: var(--ep-text);
+  --card: var(--ep-surface);
+  --card-foreground: var(--ep-text);
+  --popover: #ffffff;
+  --popover-foreground: var(--ep-text);
+  --muted: var(--ep-surface-elevated);
+  --muted-foreground: var(--ep-text-muted);
   --destructive: #ef4444;
   --destructive-foreground: #ffffff;
-
-  /* Border & Input */
-  --border: #27272a;
-  --input: #27272a;
-  --ring: rgba(255, 255, 255, 0.2);
-
-  /* Chart colors - Monochrome */
-  --chart-1: #ffffff;
-  --chart-2: #a1a1aa;
-  --chart-3: #71717a;
-  --chart-4: #52525b;
-  --chart-5: #3f3f46;
-
-  /* Sidebar */
-  --sidebar: #0a0a0a;
-  --sidebar-foreground: #ffffff;
-  --sidebar-primary: #ffffff;
-  --sidebar-primary-foreground: #000000;
-  --sidebar-accent: #18181b;
-  --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: #27272a;
-  --sidebar-ring: rgba(255, 255, 255, 0.2);
-
+  --border: var(--ep-border);
+  --input: var(--ep-border);
+  --ring: rgba(255, 16, 42, 0.32);
+  --chart-1: var(--ep-red);
+  --chart-2: #b90a1e;
+  --chart-3: #6f6f6f;
+  --chart-4: #2a2a2a;
+  --chart-5: #181818;
+  --sidebar: #ffffff;
+  --sidebar-foreground: var(--ep-text);
+  --sidebar-primary: var(--ep-red);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: var(--ep-surface-elevated);
+  --sidebar-accent-foreground: var(--ep-text);
+  --sidebar-border: var(--ep-border);
+  --sidebar-ring: rgba(255, 16, 42, 0.32);
   --radius: 1rem;
 }
 
 .dark {
-  --primary: #ffffff;
-  --primary-foreground: #000000;
-  --accent: #e4e4e7;
-  --accent-foreground: #000000;
-  --secondary: #27272a;
-  --secondary-foreground: #ffffff;
-  --background: #000000;
-  --foreground: #ffffff;
-  --card: #121212;
-  --card-foreground: #ffffff;
-  --popover: #0a0a0a;
-  --popover-foreground: #ffffff;
-  --muted: #18181b;
-  --muted-foreground: #71717a;
+  --ep-bg: #050505;
+  --ep-surface: #111111;
+  --ep-surface-elevated: #181818;
+  --ep-graphite: #2a2a2a;
+  --ep-border: #2f2f2f;
+  --ep-red: #ff102a;
+  --ep-red-dark: #8f0012;
+  --ep-text: #f5f5f5;
+  --ep-text-secondary: #a6a6a6;
+  --ep-text-muted: #6f6f6f;
+  --ep-shell-top: rgba(255, 16, 42, 0.14);
+  --ep-shell-mid: #090909;
+  --ep-shell-bottom: #030303;
+
+  --primary: var(--ep-red);
+  --primary-foreground: #ffffff;
+  --accent: var(--ep-red);
+  --accent-foreground: #ffffff;
+  --secondary: var(--ep-graphite);
+  --secondary-foreground: var(--ep-text);
+  --background: var(--ep-bg);
+  --foreground: var(--ep-text);
+  --card: var(--ep-surface);
+  --card-foreground: var(--ep-text);
+  --popover: #090909;
+  --popover-foreground: var(--ep-text);
+  --muted: var(--ep-surface-elevated);
+  --muted-foreground: var(--ep-text-muted);
   --destructive: #ef4444;
   --destructive-foreground: #ffffff;
-  --border: #27272a;
-  --input: #27272a;
-  --ring: rgba(255, 255, 255, 0.2);
+  --border: var(--ep-border);
+  --input: var(--ep-border);
+  --ring: rgba(255, 16, 42, 0.32);
+  --sidebar: #080808;
+  --sidebar-foreground: var(--ep-text);
+  --sidebar-accent: var(--ep-surface-elevated);
+  --sidebar-border: var(--ep-border);
 }
 
 @layer base {
@@ -126,10 +139,12 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-black text-white antialiased;
+    @apply antialiased;
+    background: var(--ep-bg);
+    color: var(--ep-text);
     font-family:
-      "Manrope",
       "Inter",
+      "Exo 2",
       system-ui,
       -apple-system,
       sans-serif;
@@ -139,7 +154,8 @@
 
   /* Selection style */
   ::selection {
-    @apply bg-white text-black;
+    background: var(--ep-red);
+    color: white;
   }
 
   button:not(:disabled),
@@ -329,4 +345,125 @@ input[type="range"].progress-slider::-webkit-slider-thumb {
   border-radius: 50%;
   margin-top: -4px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+@layer components {
+  .epicenter-shell {
+    background:
+      radial-gradient(circle at 50% -12%, var(--ep-shell-top), transparent 35%),
+      linear-gradient(180deg, var(--ep-shell-mid) 0%, var(--ep-bg) 42%, var(--ep-shell-bottom) 100%);
+    color: var(--ep-text);
+  }
+
+  .premium-title {
+    font-family: "Exo 2", "Orbitron", "Inter", system-ui, sans-serif;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .dsp-numeric {
+    font-family: "Orbitron", "Exo 2", "Roboto Mono", monospace;
+  }
+
+  .premium-card {
+    background:
+      linear-gradient(145deg, rgba(255,255,255,0.045), rgba(255,255,255,0) 36%),
+      linear-gradient(180deg, #181818, #0d0d0d);
+    border: 1px solid var(--ep-border);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.06),
+      0 18px 36px rgba(0, 0, 0, 0.42);
+  }
+
+  .hardware-button {
+    background:
+      radial-gradient(circle at 35% 25%, rgba(255,255,255,0.18), transparent 28%),
+      linear-gradient(145deg, #2a2a2a, #080808 72%);
+    border: 1px solid rgba(255, 16, 42, 0.58);
+    box-shadow:
+      inset 0 1px 1px rgba(255,255,255,0.12),
+      inset 0 -8px 18px rgba(0,0,0,0.45),
+      0 0 18px rgba(255, 16, 42, 0.24);
+  }
+
+  .quality-chip {
+    border: 1px solid rgba(143, 0, 18, 0.85);
+    background: linear-gradient(180deg, #0b0b0b, #050505);
+    color: #f5f5f5;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 0 12px rgba(255, 16, 42, 0.08);
+  }
+
+  .red-glow-subtle {
+    box-shadow: 0 0 18px rgba(255, 16, 42, 0.18);
+  }
+
+  .technical-grid {
+    background-image:
+      linear-gradient(rgba(255,255,255,0.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.045) 1px, transparent 1px),
+      radial-gradient(circle at 50% 0%, rgba(255, 16, 42, 0.13), transparent 50%);
+    background-size: 24px 24px, 24px 24px, 100% 100%;
+  }
+
+  .library-tabs button,
+  .premium-pill {
+    border: 1px solid var(--ep-border);
+    background: #0b0b0b;
+    color: var(--ep-text-secondary);
+  }
+
+  .library-tabs button[aria-pressed="true"],
+  .premium-pill-active {
+    border-color: rgba(255, 16, 42, 0.72);
+    color: #ffffff;
+    box-shadow: 0 0 14px rgba(255, 16, 42, 0.16);
+  }
+
+  .signal-meter-bar {
+    background: linear-gradient(90deg, #4d000a, #ff102a 62%, #ff6675);
+    box-shadow: 0 0 12px rgba(255, 16, 42, 0.28);
+  }
+}
+
+body {
+  background: var(--ep-bg);
+  color: var(--ep-text);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 16, 42, 0.32);
+}
+
+input[type="range"].progress-slider::-webkit-slider-runnable-track {
+  background: linear-gradient(90deg, rgba(255,16,42,0.86), rgba(143,0,18,0.75));
+}
+
+input[type="range"].progress-slider::-webkit-slider-thumb {
+  background: #ff102a;
+  box-shadow: 0 0 12px rgba(255, 16, 42, 0.55);
+}
+
+
+/* Light mode keeps the red identity while flipping core surfaces/text for the existing toggle. */
+html:not(.dark) .epicenter-shell .bg-black,
+html:not(.dark) .epicenter-shell .bg-\[\#080808\],
+html:not(.dark) .epicenter-shell .bg-\[\#090909\],
+html:not(.dark) .epicenter-shell .bg-\[\#0b0b0b\],
+html:not(.dark) .epicenter-shell .bg-\[\#0d0d0d\],
+html:not(.dark) .epicenter-shell .bg-\[\#101010\],
+html:not(.dark) .epicenter-shell .bg-\[\#111\],
+html:not(.dark) .epicenter-shell .bg-\[\#111111\] {
+  background-color: var(--ep-surface) !important;
+}
+html:not(.dark) .epicenter-shell .text-white {
+  color: var(--ep-text) !important;
+}
+html:not(.dark) .epicenter-shell .text-zinc-400,
+html:not(.dark) .epicenter-shell .text-zinc-500,
+html:not(.dark) .epicenter-shell .text-zinc-600 {
+  color: var(--ep-text-muted) !important;
+}
+html:not(.dark) .premium-card {
+  background: linear-gradient(145deg, rgba(255,255,255,0.92), rgba(245,245,245,0.96));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 12px 26px rgba(0,0,0,0.12);
 }
