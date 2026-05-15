@@ -75,6 +75,7 @@ public class MusicScannerPlugin extends Plugin {
   private static final int AUDIO_BUFFER_SIZE = 512 * 1024;
 
   private final ExecutorService audioExecutor = Executors.newSingleThreadExecutor();
+  private final ExecutorService dbExecutor = Executors.newSingleThreadExecutor();
   private volatile ServerSocket audioServerSocket;
   private volatile int audioServerPort = -1;
   private final String audioSessionToken = UUID.randomUUID().toString();
@@ -378,40 +379,50 @@ public class MusicScannerPlugin extends Plugin {
   private void pickManualAudioTracksResult(PluginCall call, androidx.activity.result.ActivityResult result) {
     if (call == null) return;
     if (result.getResultCode() != android.app.Activity.RESULT_OK || result.getData() == null) {
-      JSObject out = new JSObject();
-      out.put("count", dao().countAll());
-      out.put("changed", 0);
-      out.put("records", new JSArray());
-      out.put("success", true);
-      call.resolve(out);
+      dbExecutor.execute(() -> {
+        try {
+          JSObject out = new JSObject();
+          out.put("count", dao().countAll());
+          out.put("changed", 0);
+          out.put("records", new JSArray());
+          out.put("success", true);
+          call.resolve(out);
+        } catch (Exception e) {
+          call.reject("Error finishing manual picker: " + e.getMessage(), e);
+        }
+      });
       return;
     }
 
-    try {
-      Intent data = result.getData();
-      List<Uri> uris = new ArrayList<>();
-      if (data.getClipData() != null) {
-        for (int i = 0; i < data.getClipData().getItemCount(); i++) {
-          uris.add(data.getClipData().getItemAt(i).getUri());
-        }
-      } else if (data.getData() != null) {
-        uris.add(data.getData());
+    Intent data = result.getData();
+    List<Uri> uris = new ArrayList<>();
+    if (data.getClipData() != null) {
+      for (int i = 0; i < data.getClipData().getItemCount(); i++) {
+        uris.add(data.getClipData().getItemAt(i).getUri());
       }
-
-      int persistableFlags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-      if ((persistableFlags & Intent.FLAG_GRANT_READ_URI_PERMISSION) == 0) {
-        persistableFlags |= Intent.FLAG_GRANT_READ_URI_PERMISSION;
-      }
-      JSArray imported = importManualUris(uris, persistableFlags);
-      JSObject out = new JSObject();
-      out.put("count", dao().countAll());
-      out.put("changed", imported.length());
-      out.put("records", imported);
-      out.put("success", true);
-      call.resolve(out);
-    } catch (Exception e) {
-      call.reject("Error importing picked tracks: " + e.getMessage(), e);
+    } else if (data.getData() != null) {
+      uris.add(data.getData());
     }
+
+    int persistableFlags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+    if ((persistableFlags & Intent.FLAG_GRANT_READ_URI_PERMISSION) == 0) {
+      persistableFlags |= Intent.FLAG_GRANT_READ_URI_PERMISSION;
+    }
+    final int finalPersistableFlags = persistableFlags;
+    dbExecutor.execute(() -> {
+      try {
+        JSArray imported = importManualUris(uris, finalPersistableFlags);
+        JSObject out = new JSObject();
+        out.put("count", dao().countAll());
+        out.put("changed", imported.length());
+        out.put("records", imported);
+        out.put("success", true);
+        call.resolve(out);
+      } catch (Exception e) {
+        android.util.Log.e("MusicScanner", "manualImportFailed", e);
+        call.reject("Error importing picked tracks: " + e.getMessage(), e);
+      }
+    });
   }
 
   @PluginMethod
@@ -422,29 +433,32 @@ public class MusicScannerPlugin extends Plugin {
       return;
     }
 
-    try {
-      migrateSharedPrefsToRoomIfNeeded();
-      List<Uri> uris = new ArrayList<>();
-      for (int i = 0; i < items.length(); i++) {
-        JSONObject obj;
-        try {
-          obj = items.getJSONObject(i);
-        } catch (Exception parseErr) {
-          continue;
+    dbExecutor.execute(() -> {
+      try {
+        migrateSharedPrefsToRoomIfNeeded();
+        List<Uri> uris = new ArrayList<>();
+        for (int i = 0; i < items.length(); i++) {
+          JSONObject obj;
+          try {
+            obj = items.getJSONObject(i);
+          } catch (Exception parseErr) {
+            continue;
+          }
+          String contentUri = obj.optString("contentUri", "");
+          if (contentUri != null && !contentUri.isEmpty()) uris.add(Uri.parse(contentUri));
         }
-        String contentUri = obj.optString("contentUri", "");
-        if (contentUri != null && !contentUri.isEmpty()) uris.add(Uri.parse(contentUri));
+        JSArray imported = importManualUris(uris, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        JSObject result = new JSObject();
+        result.put("count", dao().countAll());
+        result.put("changed", imported.length());
+        result.put("records", imported);
+        result.put("success", true);
+        call.resolve(result);
+      } catch (Exception e) {
+        android.util.Log.e("MusicScanner", "manualImportFailed", e);
+        call.reject("Error importing manual tracks: " + e.getMessage(), e);
       }
-      JSArray imported = importManualUris(uris, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-      JSObject result = new JSObject();
-      result.put("count", dao().countAll());
-      result.put("changed", imported.length());
-      result.put("records", imported);
-      result.put("success", true);
-      call.resolve(result);
-    } catch (Exception e) {
-      call.reject("Error importing manual tracks: " + e.getMessage(), e);
-    }
+    });
   }
 
 
@@ -463,6 +477,14 @@ public class MusicScannerPlugin extends Plugin {
             android.util.Log.i("MusicScanner", "manualImportPersistedUriPermission uri=" + uri + " flags=" + persistableFlags);
           } catch (Exception permissionError) {
             android.util.Log.w("MusicScanner", "persistUriPermissionFailed uri=" + uri + " flags=" + persistableFlags + " reason=" + permissionError.getMessage());
+            if ((persistableFlags & Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0 && persistableFlags != Intent.FLAG_GRANT_READ_URI_PERMISSION) {
+              try {
+                getContext().getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                android.util.Log.i("MusicScanner", "manualImportPersistedUriPermissionReadOnly uri=" + uri);
+              } catch (Exception readOnlyPermissionError) {
+                android.util.Log.w("MusicScanner", "persistUriPermissionReadOnlyFailed uri=" + uri + " reason=" + readOnlyPermissionError.getMessage());
+              }
+            }
           }
         }
 
@@ -646,6 +668,12 @@ public class MusicScannerPlugin extends Plugin {
       audioExecutor.shutdownNow();
     } catch (Exception e) {
       android.util.Log.w("MusicScanner", "audioExecutorShutdownFailed " + e.getMessage());
+    }
+
+    try {
+      dbExecutor.shutdownNow();
+    } catch (Exception e) {
+      android.util.Log.w("MusicScanner", "dbExecutorShutdownFailed " + e.getMessage());
     }
   }
 

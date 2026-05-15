@@ -11,6 +11,14 @@
   var EPICENTER_INTENSITY_MAX_SCALE = 0.65;
   var EPICENTER_VOLUME_MAX_SCALE = 0.75;
   var EPICENTER_OUTPUT_TRIM = 0.95;
+  var SOFT_CLIP_LIMIT = 3;
+  var FINAL_SOFT_CLIP_DRIVE = 0.9;
+  var FINAL_SOFT_CLIP_NORM = 1 / (FINAL_SOFT_CLIP_DRIVE * (27 + FINAL_SOFT_CLIP_DRIVE * FINAL_SOFT_CLIP_DRIVE) / (27 + 9 * FINAL_SOFT_CLIP_DRIVE * FINAL_SOFT_CLIP_DRIVE));
+  var fastSoftClip = (value) => {
+    const x = Math.max(-SOFT_CLIP_LIMIT, Math.min(SOFT_CLIP_LIMIT, value));
+    const x2 = x * x;
+    return x * (27 + x2) / (27 + 9 * x2);
+  };
   var BiquadFilter = class {
     constructor(type, freq, sr, Q = 0.707) {
       this.type = type;
@@ -169,6 +177,7 @@
       super();
       __publicField(this, "channels", []);
       __publicField(this, "monoState", null);
+      __publicField(this, "subBuffer", new Float32Array(128));
       __publicField(this, "lastSweepFreq", -1);
       __publicField(this, "lastWidth", -1);
     }
@@ -306,7 +315,10 @@
       this.ensureState(numChannels, { sweepFreq, width });
       const monoState = this.monoState;
       const blockSize = input[0].length;
-      const subBuffer = new Float32Array(blockSize);
+      if (this.subBuffer.length < blockSize) {
+        this.subBuffer = new Float32Array(blockSize);
+      }
+      const subBuffer = this.subBuffer;
       const intensityRawNorm = Math.max(0, Math.min(100, intensity)) / 100;
       const intensityScaledNorm = intensityRawNorm * EPICENTER_INTENSITY_MAX_SCALE;
       const intensityNorm = intensityScaledNorm * EPICENTER_INTENSITY_HEADROOM;
@@ -321,8 +333,8 @@
       const lowMidDipAmount = (0.08 + intensityNorm * 0.16) * (0.45 + widthNorm * 0.3);
       const gateHoldSamples = Math.floor(sampleRate * (0.025 + intensityNorm * 0.06));
       for (let i = 0; i < blockSize; i++) {
-        const left = input[0][i] ?? 0;
-        const right = (numChannels > 1 ? input[1][i] : left) ?? left;
+        const left = input[0][i] || 0;
+        const right = numChannels > 1 ? input[1][i] || 0 : left;
         const mono = this.denormalFloor((left + right) * 0.5);
         const diff = this.denormalFloor((left - right) * 0.5);
         const monoBand = monoState.band60.process(mono) * 1 + monoState.band80.process(mono) * 0.68 + monoState.band110.process(mono) * 0.42;
@@ -346,8 +358,9 @@
         }
         const holdFactor = monoState.holdSamples > 0 ? 1 : 0;
         const remixGate = Math.max(gateValue, holdFactor * 0.45);
-        const leveledSynth = monoState.synthLevelEnv.process(synth) * Math.sign(synth);
-        const protectedSynth = Math.tanh((synth * 0.65 + leveledSynth * 0.35) * 1.92) * 0.72;
+        const synthLevel = monoState.synthLevelEnv.process(synth);
+        const leveledSynth = synth < 0 ? -synthLevel : synth > 0 ? synthLevel : 0;
+        const protectedSynth = fastSoftClip((synth * 0.65 + leveledSynth * 0.35) * 1.92) * 0.72;
         subBuffer[i] = this.denormalFloor(protectedSynth * synthAmount * remixGate);
       }
       for (let ch = 0; ch < numChannels; ch++) {
@@ -370,7 +383,7 @@
           mixed = state.bassBoostShelf.process(mixed);
           const protectionGain = 0.94 + voiceProtection * 0.06;
           mixed *= volumeGain * protectionGain * EPICENTER_OUTPUT_TRIM;
-          mixed = Math.tanh(mixed * 0.9) / Math.tanh(0.9);
+          mixed = fastSoftClip(mixed * FINAL_SOFT_CLIP_DRIVE) * FINAL_SOFT_CLIP_NORM;
           mixed = state.outputDcHighpass.process(mixed);
           outChan[i] = this.denormalFloor(mixed);
         }

@@ -944,8 +944,10 @@ export default function Home() {
   }, [queue.currentTrack, requestTrackPlayback]);
 
   const handleFileSelect = useCallback(async () => {
-    const isAndroidNative = /android/.test(navigator.userAgent.toLowerCase()) &&
-      !!(window as any).Capacitor?.Plugins?.MusicScanner;
+    const capacitor = (window as any).Capacitor;
+    const musicScanner = capacitor?.Plugins?.MusicScanner;
+    const platform = typeof capacitor?.getPlatform === "function" ? capacitor.getPlatform() : "";
+    const isAndroidNative = !!musicScanner && (platform === "android" || /android/.test(navigator.userAgent.toLowerCase()));
 
     const handleImportResult = (result: { added: number; duplicates: string[] }) => {
       if (result.added > 0) {
@@ -963,10 +965,12 @@ export default function Home() {
 
     try {
       if (isAndroidNative) {
+        console.info("[ManualImport] using native Android picker", { platform });
         const result = await queue.importManualTracksFromNativePicker();
         handleImportResult(result);
         return;
       }
+      console.info("[ManualImport] using Web file picker fallback", { platform, hasMusicScanner: !!musicScanner });
 
       const input = document.createElement("input");
       input.type = "file";
@@ -979,12 +983,18 @@ export default function Home() {
           const result = await queue.addToLibrary(files);
           handleImportResult(result);
         } catch (error) {
-          toast.error(t("actions.errorAddingSongs"));
+          console.error("[ManualImport] Web fallback failed", error);
+          toast.error(t("actions.errorAddingSongs"), {
+            description: error instanceof Error ? error.message : undefined,
+          });
         }
       };
       input.click();
     } catch (error) {
-      toast.error(t("actions.errorAddingSongs"));
+      console.error("[ManualImport] Native import failed", error);
+      toast.error(t("actions.errorAddingSongs"), {
+        description: error instanceof Error ? error.message : undefined,
+      });
     }
   }, [queue, t]);
 
