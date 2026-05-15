@@ -73,8 +73,8 @@ export function HomeSettingsView({
 
         <div className="bg-zinc-900/50 rounded-2xl p-4">
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-full bg-blue-600/20 flex items-center justify-center">
-              <Globe className="w-5 h-5 text-blue-400" />
+            <div className="w-10 h-10 rounded-full bg-[rgba(255,16,42,0.12)] border border-[rgba(255,16,42,0.25)] flex items-center justify-center">
+              <Globe className="w-5 h-5 text-[var(--ep-red)]" />
             </div>
             <div>
               <h3 className="font-semibold">{t("settings.language")}</h3>
@@ -113,8 +113,8 @@ export function HomeSettingsView({
 
         <div className="bg-zinc-900/50 rounded-2xl p-4">
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-full bg-green-600/20 flex items-center justify-center">
-              <Volume2 className="w-5 h-5 text-green-400" />
+            <div className="w-10 h-10 rounded-full bg-[rgba(255,16,42,0.12)] border border-[rgba(255,16,42,0.25)] flex items-center justify-center">
+              <Volume2 className="w-5 h-5 text-[var(--ep-red)]" />
             </div>
             <div>
               <h3 className="font-semibold">{t("settings.playback")}</h3>
@@ -163,8 +163,8 @@ export function HomeSettingsView({
 
         <div className="bg-zinc-900/50 rounded-2xl p-4">
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-full bg-yellow-600/20 flex items-center justify-center">
-              <BookOpen className="w-5 h-5 text-yellow-400" />
+            <div className="w-10 h-10 rounded-full bg-[rgba(255,16,42,0.12)] border border-[rgba(255,16,42,0.25)] flex items-center justify-center">
+              <BookOpen className="w-5 h-5 text-[var(--ep-red)]" />
             </div>
             <div>
               <h3 className="font-semibold">{t("settings.howToUse")}</h3>
@@ -187,8 +187,8 @@ export function HomeSettingsView({
 
         <div className="bg-zinc-900/50 rounded-2xl p-4">
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-full bg-purple-600/20 flex items-center justify-center">
-              <Info className="w-5 h-5 text-purple-400" />
+            <div className="w-10 h-10 rounded-full bg-[rgba(255,16,42,0.12)] border border-[rgba(255,16,42,0.25)] flex items-center justify-center">
+              <Info className="w-5 h-5 text-[var(--ep-red)]" />
             </div>
             <div>
               <h3 className="font-semibold">{t("settings.about")}</h3>
@@ -199,7 +199,7 @@ export function HomeSettingsView({
           </div>
           <div className="space-y-4">
             <div className="flex items-center gap-4 p-3 bg-zinc-800/50 rounded-xl">
-              <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-red-600 to-red-800 flex items-center justify-center">
+              <div className="w-14 h-14 rounded-xl bg-[linear-gradient(145deg,#2a2a2a,#080808)] border border-[rgba(255,16,42,0.45)] flex items-center justify-center">
                 <svg
                   className="w-8 h-8 text-white"
                   viewBox="0 0 24 24"
@@ -225,7 +225,7 @@ export function HomeSettingsView({
               <ul className="space-y-2 text-sm text-zinc-400">
                 {[1, 2, 3, 4].map((index) => (
                   <li key={index} className="flex items-center gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--ep-red)]" />
                     {t(`settings.feature${index}`)}
                   </li>
                 ))}
@@ -236,8 +236,8 @@ export function HomeSettingsView({
 
         <div className="bg-zinc-900/50 rounded-2xl p-4">
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-full bg-emerald-600/20 flex items-center justify-center">
-              <FileText className="w-5 h-5 text-emerald-400" />
+            <div className="w-10 h-10 rounded-full bg-[rgba(255,16,42,0.12)] border border-[rgba(255,16,42,0.25)] flex items-center justify-center">
+              <FileText className="w-5 h-5 text-[var(--ep-red)]" />
             </div>
             <div>
               <h3 className="font-semibold">{t("settings.legal")}</h3>

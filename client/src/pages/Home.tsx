@@ -29,6 +29,7 @@ import { useCrossfade } from "@/hooks/useCrossfade";
 import { useLastTrack } from "@/hooks/useLastTrack";
 import { useTheme } from "@/contexts/ThemeContext";
 import { BottomNavigation } from "@/components/BottomNavigation";
+import { PremiumMiniPlayer } from "@/components/PremiumMiniPlayer";
 import {
   AddSongsToPlaylistModal,
   AddToPlaylistModal,
@@ -1513,7 +1514,7 @@ export default function Home() {
   );
 
   return (
-    <div className="min-h-screen flex flex-col bg-black text-white">
+    <div className="epicenter-shell min-h-screen flex flex-col bg-black text-white">
       <TrackContextMenu
         contextMenu={contextMenu}
         t={t}
@@ -1662,6 +1663,8 @@ export default function Home() {
         onTouchStartChange={setTouchStart}
         formatTime={formatTime}
         hiresAudioBadgeUrl={hiresAudioBadgeUrl}
+        epicenterEnabled={epicenterEnabled}
+        getAnalyserNode={audioProcessor.getAnalyserNode}
       />
 
       {activeTab === "library" && (
@@ -1748,6 +1751,8 @@ export default function Home() {
           params={dspControls}
           onOpenAutoModal={() => setShowDspAutoModal(true)}
           onToggleEpicenter={toggleEpicenter}
+          onOpenEq={() => setActiveTab("eq")}
+          onOpenFx={() => setActiveTab("fx")}
         />
       )}
 
@@ -1856,6 +1861,18 @@ export default function Home() {
 
       <HomeImportProgressOverlay t={t} importProgress={queue.importProgress} />
 
+      {activeTab !== "player" && (
+        <PremiumMiniPlayer
+          track={nowPlayingTrack}
+          isPlaying={audioProcessor.isPlaying}
+          currentTime={audioProcessor.currentTime}
+          duration={audioProcessor.duration}
+          onPlay={audioProcessor.play}
+          onPause={audioProcessor.pause}
+          onOpenPlayer={() => setActiveTab("player")}
+        />
+      )}
+
       {/* Bottom Navigation */}
       <BottomNavigation
         activeTab={activeTab}
@@ -1872,7 +1889,7 @@ export default function Home() {
         }
         t={t}
       />
-      <div className={activeTab === "player" ? "h-0" : "h-24"} />
+      <div className={activeTab === "player" ? "h-0" : "h-32"} />
     </div>
   );
 }
