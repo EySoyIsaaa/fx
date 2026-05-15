@@ -348,8 +348,8 @@
       const lowMidDipAmount = (0.08 + intensityNorm * 0.16) * (0.45 + widthNorm * 0.3);
       const gateHoldSamples = Math.floor(sampleRate * (0.025 + intensityNorm * 0.06));
       for (let i = 0; i < blockSize; i++) {
-        const left = input[0][i] ?? 0;
-        const right = (numChannels > 1 ? input[1][i] : left) ?? left;
+        const left = input[0][i] || 0;
+        const right = numChannels > 1 ? input[1][i] || 0 : left;
         const mono = this.denormalFloor((left + right) * 0.5);
         const diff = this.denormalFloor((left - right) * 0.5);
         const monoBand = monoState.band60.process(mono) * 1 + monoState.band80.process(mono) * 0.68 + monoState.band110.process(mono) * 0.42;

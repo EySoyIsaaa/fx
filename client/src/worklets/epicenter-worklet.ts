@@ -460,8 +460,8 @@ class EpicenterProcessor extends AudioWorkletProcessor {
     const gateHoldSamples = Math.floor(sampleRate * (0.025 + intensityNorm * 0.06));
 
     for (let i = 0; i < blockSize; i++) {
-      const left = input[0][i] ?? 0;
-      const right = (numChannels > 1 ? input[1][i] : left) ?? left;
+      const left = input[0][i] || 0;
+      const right = numChannels > 1 ? (input[1][i] || 0) : left;
 
       const mono = this.denormalFloor((left + right) * 0.5);
       const diff = this.denormalFloor((left - right) * 0.5);
