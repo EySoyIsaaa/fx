@@ -3,6 +3,7 @@ import { ChevronDown, Disc3, GripVertical, Pause, Play, Plus, SkipBack, SkipForw
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AudioQualityBadge } from "@/components/AudioQualityBadge";
 import { TrackArtwork } from "@/components/TrackArtwork";
+import { AudioSpectrumMeter } from "@/components/AudioSpectrumMeter";
 import type { Track } from "@/hooks/useAudioQueue";
 import type { TranslateFn } from "@/components/home/types";
 

@@ -52,7 +52,7 @@ export function SplashScreen({ onFinish, duration = 2000 }: SplashScreenProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center">
+    <div className="fixed inset-0 z-[100] epicenter-shell flex flex-col items-center justify-center">
       <div className={`flex flex-col items-center transition-opacity duration-400 ${getOpacity()}`}>
         {/* Epicenter Icon */}
         <div className="relative mb-6">
@@ -64,22 +64,22 @@ export function SplashScreen({ onFinish, duration = 2000 }: SplashScreenProps) {
         </div>
 
         {/* App name */}
-        <h1 className="text-2xl font-bold text-white tracking-tight mb-1">
+        <h1 className="premium-title mb-1 text-2xl font-black text-[var(--ep-text)]">
           EpicenterDSP Player
         </h1>
-        <p className="text-sm text-zinc-500 font-medium tracking-widest uppercase">
+        <p className="text-sm font-bold tracking-widest uppercase text-[var(--ep-text-muted)]">
           Bass Enhancement
         </p>
 
         {/* Version badge */}
-        <div className="mt-8 px-3 py-1 rounded-full bg-zinc-900 border border-zinc-800">
-          <span className="text-xs text-zinc-500">v{t('app.version')}</span>
+        <div className="mt-8 rounded-full border border-[var(--ep-border)] bg-[var(--ep-surface)] px-3 py-1">
+          <span className="text-xs font-bold text-[var(--ep-text-muted)]">v{t('app.version')}</span>
         </div>
       </div>
 
       {/* Bottom branding */}
       <div className={`absolute bottom-12 transition-opacity duration-400 ${getOpacity()}`}>
-        <p className="text-xs text-zinc-700">Bass Reconstruction Technology</p>
+        <p className="text-xs text-[var(--ep-text-muted)]">Bass Reconstruction Technology</p>
       </div>
     </div>
   );
