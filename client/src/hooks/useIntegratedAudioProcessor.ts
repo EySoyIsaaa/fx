@@ -432,7 +432,10 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
     concertSafetyTimerRef.current = window.setInterval(() => {
       const ctx = audioContextRef.current;
       const analyser = concertSafetyAnalyserRef.current;
-      if (!ctx || !analyser) return;
+      const shouldMonitorConcert =
+        spatialEffectsRef.current.concertHallEnabled ||
+        (ctx ? ctx.currentTime < concertSafetyMuteUntilRef.current : false);
+      if (!ctx || !analyser || !shouldMonitorConcert) return;
 
       analyser.getFloatTimeDomainData(wetWindow);
       let peak = 0;
@@ -511,8 +514,13 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
 
   const initAudioChain = useCallback(async () => {
     if (!audioContextRef.current) {
-      audioContextRef.current = new (window.AudioContext ||
-        (window as any).webkitAudioContext)();
+      const AudioContextCtor = window.AudioContext ||
+        (window as any).webkitAudioContext;
+      try {
+        audioContextRef.current = new AudioContextCtor({ latencyHint: "playback" });
+      } catch (_error) {
+        audioContextRef.current = new AudioContextCtor();
+      }
     }
     const ctx = audioContextRef.current;
 
@@ -756,10 +764,15 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
     const currentEffects = spatialEffectsRef.current;
     applySpatialEffects(currentEffects);
 
-    // Determinar si necesitamos bypass completo
+    // Determinar si necesitamos bypass completo. EQ encendido pero plano (0 dB)
+    // no debe forzar la cadena pesada porque en Android puede causar microcortes.
+    const eqHasAudibleChanges =
+      eqEnabledRef.current &&
+      (Math.abs(eqUserPreampDbRef.current) > 0.01 ||
+        eqBandsRef.current.some((band) => Math.abs(band.gain) > 0.01));
     const needsBypass =
       !epicenterEnabledRef.current &&
-      !eqEnabledRef.current &&
+      !eqHasAudibleChanges &&
       !currentEffects.reverbEnabled &&
       !currentEffects.concertHallEnabled;
 
@@ -1331,8 +1344,9 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
     (preampDb: number) => {
       eqUserPreampDbRef.current = preampDb;
       applyEqOutputGain(eqBandsRef.current);
+      setTimeout(() => updateAudioRouting(), 0);
     },
-    [applyEqOutputGain],
+    [applyEqOutputGain, updateAudioRouting],
   );
 
   const getAnalyserNode = useCallback(() => analyserNodeRef.current, []);
@@ -1357,8 +1371,9 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
       if (eqFiltersRef.current[index]) {
         eqFiltersRef.current[index].gain.value = eqEnabled ? clampedGain : 0;
       }
+      setTimeout(() => updateAudioRouting(), 0);
     },
-    [applyEqOutputGain, eqEnabled],
+    [applyEqOutputGain, eqEnabled, updateAudioRouting],
   );
 
   const setEqEnabled = useCallback(

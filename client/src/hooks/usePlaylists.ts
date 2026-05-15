@@ -1,6 +1,6 @@
 /**
  * usePlaylists - Hook para gestión de playlists
- * Persiste en IndexedDB, solo guarda referencias a IDs de canciones
+ * Persiste en SQLite/Room, solo guarda referencias a IDs de canciones
  * 
  * v1.1.2
  */
@@ -29,7 +29,7 @@ export function usePlaylists(library: Track[]): PlaylistController {
   const [storedPlaylists, setStoredPlaylists] = useState<StoredPlaylist[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Load playlists from IndexedDB
+  // Load playlists from SQLite/Room
   const loadPlaylists = useCallback(async () => {
     try {
       setIsLoading(true);
