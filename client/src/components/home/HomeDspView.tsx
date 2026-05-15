@@ -63,6 +63,15 @@ export function HomeDspView({
               />
             ))}
           </div>
+          <div className="flex items-center gap-2 text-[var(--ep-text-secondary)]">
+            <ChevronLeft className="h-5 w-5" />
+            <ChevronRight className="h-5 w-5" />
+          </div>
+        </div>
+        <div className="flex items-center justify-center gap-2">
+          {presets.map((preset) => (
+            <span key={preset} className={`h-1.5 rounded-full ${preset === "Deep" ? "w-7 bg-[var(--ep-red)]" : "w-1.5 bg-[var(--ep-border)]"}`} />
+          ))}
         </div>
       </section>
 
