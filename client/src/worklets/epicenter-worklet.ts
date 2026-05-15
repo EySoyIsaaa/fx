@@ -30,15 +30,13 @@ const EPICENTER_INTENSITY_HEADROOM = 0.75;
 const EPICENTER_INTENSITY_MAX_SCALE = 0.65;
 const EPICENTER_VOLUME_MAX_SCALE = 0.75;
 const EPICENTER_OUTPUT_TRIM = 0.95;
-const SOFT_CLIP_LIMIT = 3;
-const FINAL_SOFT_CLIP_DRIVE = 0.9;
-const FINAL_SOFT_CLIP_NORM = 1 / (FINAL_SOFT_CLIP_DRIVE * (27 + FINAL_SOFT_CLIP_DRIVE * FINAL_SOFT_CLIP_DRIVE) / (27 + 9 * FINAL_SOFT_CLIP_DRIVE * FINAL_SOFT_CLIP_DRIVE));
+const DEEP_EXTENSION_AMOUNT = 0.18;
 
-const fastSoftClip = (value: number): number => {
-  const x = Math.max(-SOFT_CLIP_LIMIT, Math.min(SOFT_CLIP_LIMIT, value));
-  const x2 = x * x;
-  return x * (27 + x2) / (27 + 9 * x2);
+const softClip = (value: number): number => {
+  const x2 = value * value;
+  return (value * (27 + x2)) / (27 + 9 * x2);
 };
+const SOFT_CLIP_09 = softClip(0.9);
 
 type FilterType = 'lowpass' | 'highpass' | 'bandpass';
 
@@ -240,11 +238,14 @@ interface MonoDetectorState {
   diffHighpass: BiquadFilter;
   synthHighpass: BiquadFilter;
   synthLowpass: BiquadFilter;
+  deepExtensionLowpass: BiquadFilter;
+  deepExtensionSubsonicHighpass: BiquadFilter;
   detectorEnv: EnvelopeFollower;
   monoEnv: EnvelopeFollower;
   diffEnv: EnvelopeFollower;
   gateEnv: EnvelopeFollower;
   synthLevelEnv: EnvelopeFollower;
+  deepExtensionEnv: EnvelopeFollower;
   lastDetector: number;
   flipState: number;
   holdSamples: number;
@@ -263,7 +264,8 @@ class EpicenterProcessor extends AudioWorkletProcessor {
 
   private channels: StereoChannelState[] = [];
   private monoState: MonoDetectorState | null = null;
-  private subBuffer = new Float32Array(128);
+  private subBuffer = new Float32Array(0);
+  private deepExtensionBuffer = new Float32Array(0);
   private lastSweepFreq = -1;
   private lastWidth = -1;
 
@@ -297,7 +299,7 @@ class EpicenterProcessor extends AudioWorkletProcessor {
   }
 
   private createMonoState(params: { sweepFreq: number; width: number }): MonoDetectorState {
-    const { detector60, detector80, detector110, synthLowHz, synthHighHz } = this.getDerivedFrequencies(params.sweepFreq, params.width);
+    const { detector60, detector80, detector110, synthLowHz, synthHighHz, deepExtensionHz } = this.getDerivedFrequencies(params.sweepFreq, params.width);
 
     return {
       band60: new BiquadFilter('bandpass', detector60, sampleRate, 1.35),
@@ -307,11 +309,14 @@ class EpicenterProcessor extends AudioWorkletProcessor {
       diffHighpass: new BiquadFilter('highpass', 140, sampleRate, 0.707),
       synthHighpass: new BiquadFilter('highpass', synthHighHz, sampleRate, 0.707),
       synthLowpass: new BiquadFilter('lowpass', synthLowHz, sampleRate, 0.707),
+      deepExtensionLowpass: new BiquadFilter('lowpass', deepExtensionHz, sampleRate, 0.707),
+      deepExtensionSubsonicHighpass: new BiquadFilter('highpass', 24, sampleRate, 0.707),
       detectorEnv: new EnvelopeFollower(this.coeffFromMs(7), this.coeffFromMs(95)),
       monoEnv: new EnvelopeFollower(this.coeffFromMs(12), this.coeffFromMs(160)),
       diffEnv: new EnvelopeFollower(this.coeffFromMs(12), this.coeffFromMs(160)),
       gateEnv: new EnvelopeFollower(this.coeffFromMs(25), this.coeffFromMs(240)),
       synthLevelEnv: new EnvelopeFollower(this.coeffFromMs(18), this.coeffFromMs(180)),
+      deepExtensionEnv: new EnvelopeFollower(this.coeffFromMs(24), this.coeffFromMs(420)),
       lastDetector: 0,
       flipState: 1,
       holdSamples: 0,
@@ -330,6 +335,7 @@ class EpicenterProcessor extends AudioWorkletProcessor {
     const subTopHz = 58 + widthNorm * 10;
     const synthLowHz = 48 + widthNorm * 8;
     const synthHighHz = 16 + sweepNorm * 4;
+    const deepExtensionHz = 34 + widthNorm * 5;
 
     return {
       detector60,
@@ -340,6 +346,7 @@ class EpicenterProcessor extends AudioWorkletProcessor {
       subTopHz,
       synthLowHz,
       synthHighHz,
+      deepExtensionHz,
     };
   }
 
@@ -375,9 +382,24 @@ class EpicenterProcessor extends AudioWorkletProcessor {
     this.monoState.band110.updateCoeffs('bandpass', derived.detector110, 1.8);
     this.monoState.synthHighpass.updateCoeffs('highpass', derived.synthHighHz, 0.707);
     this.monoState.synthLowpass.updateCoeffs('lowpass', derived.synthLowHz, 0.707);
+    this.monoState.deepExtensionLowpass.updateCoeffs('lowpass', derived.deepExtensionHz, 0.707);
 
     this.lastSweepFreq = params.sweepFreq;
     this.lastWidth = params.width;
+  }
+
+  private getSubBuffer(size: number): Float32Array {
+    if (this.subBuffer.length < size) {
+      this.subBuffer = new Float32Array(size);
+    }
+    return this.subBuffer;
+  }
+
+  private getDeepExtensionBuffer(size: number): Float32Array {
+    if (this.deepExtensionBuffer.length < size) {
+      this.deepExtensionBuffer = new Float32Array(size);
+    }
+    return this.deepExtensionBuffer;
   }
 
   private computeGate(monoEnv: number, diffEnv: number, weightedDetectorEnv: number): number {
@@ -418,10 +440,8 @@ class EpicenterProcessor extends AudioWorkletProcessor {
     const monoState = this.monoState!;
 
     const blockSize = input[0].length;
-    if (this.subBuffer.length < blockSize) {
-      this.subBuffer = new Float32Array(blockSize);
-    }
-    const subBuffer = this.subBuffer;
+    const subBuffer = this.getSubBuffer(blockSize);
+    const deepExtensionBuffer = this.getDeepExtensionBuffer(blockSize);
 
     // 100% visible en la perilla equivale al antiguo 75% efectivo para evitar distorsión de voz.
     const intensityRawNorm = Math.max(0, Math.min(100, intensity)) / 100;
@@ -477,11 +497,20 @@ class EpicenterProcessor extends AudioWorkletProcessor {
 
       const holdFactor = monoState.holdSamples > 0 ? 1 : 0;
       const remixGate = Math.max(gateValue, holdFactor * 0.45);
-      const synthLevel = monoState.synthLevelEnv.process(synth);
-      const leveledSynth = synth < 0 ? -synthLevel : synth > 0 ? synthLevel : 0;
-      const protectedSynth = fastSoftClip((synth * 0.65 + leveledSynth * 0.35) * 1.92) * 0.72;
+      const leveledSynth = monoState.synthLevelEnv.process(synth) * (synth < 0 ? -1 : 1);
+      const protectedSynth = softClip((synth * 0.65 + leveledSynth * 0.35) * 1.92) * 0.72;
 
       subBuffer[i] = this.denormalFloor(protectedSynth * synthAmount * remixGate);
+    }
+
+    const deepExtensionAmount = DEEP_EXTENSION_AMOUNT * intensityRawNorm * (0.72 + intensityScaledNorm * 0.28);
+    for (let i = 0; i < blockSize; i++) {
+      const deepLow = monoState.deepExtensionLowpass.process(subBuffer[i]);
+      const deepProtected = monoState.deepExtensionSubsonicHighpass.process(deepLow);
+      const deepSustain = monoState.deepExtensionEnv.process(deepProtected) * (deepProtected < 0 ? -1 : 1);
+      deepExtensionBuffer[i] = this.denormalFloor(
+        softClip((deepProtected * 0.72 + deepSustain * 0.28) * deepExtensionAmount),
+      );
     }
 
     for (let ch = 0; ch < numChannels; ch++) {
@@ -508,8 +537,11 @@ class EpicenterProcessor extends AudioWorkletProcessor {
           body * lowMidBodyAmount * (0.45 + voiceProtection * 0.55) -
           dip * lowMidDipAmount;
 
-        // El sub generado se inyecta mono a ambos canales, pero se atenúa cuando la voz domina.
-        const generatedSub = state.subLowpass.process(subBuffer[i]) * (0.48 + voiceProtection * 0.62);
+        // El sub principal se mantiene intacto; la extensión profunda es una capa derivada,
+        // filtrada más abajo y protegida contra subsonics para añadir cuerpo sin enturbiar.
+        const generatedSub =
+          state.subLowpass.process(subBuffer[i]) * (0.48 + voiceProtection * 0.62) +
+          deepExtensionBuffer[i] * (0.32 + voiceProtection * 0.42);
 
         let mixed =
           cleanVoicePath +
@@ -521,8 +553,8 @@ class EpicenterProcessor extends AudioWorkletProcessor {
         const protectionGain = 0.94 + voiceProtection * 0.06;
         mixed *= volumeGain * protectionGain * EPICENTER_OUTPUT_TRIM;
 
-        // Soft clip final con aproximación sin Math.tanh para mantener el worklet estable en Android.
-        mixed = fastSoftClip(mixed * FINAL_SOFT_CLIP_DRIVE) * FINAL_SOFT_CLIP_NORM;
+        // Soft clip final más relajado para no raspar la voz.
+        mixed = softClip(mixed * 0.9) / SOFT_CLIP_09;
         mixed = state.outputDcHighpass.process(mixed);
 
         outChan[i] = this.denormalFloor(mixed);

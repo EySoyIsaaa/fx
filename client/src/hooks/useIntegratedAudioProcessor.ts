@@ -432,7 +432,10 @@ export function useIntegratedAudioProcessor(): IntegratedAudioController {
     concertSafetyTimerRef.current = window.setInterval(() => {
       const ctx = audioContextRef.current;
       const analyser = concertSafetyAnalyserRef.current;
-      if (!ctx || !analyser) return;
+      const shouldMonitorConcert =
+        spatialEffectsRef.current.concertHallEnabled ||
+        (ctx ? ctx.currentTime < concertSafetyMuteUntilRef.current : false);
+      if (!ctx || !analyser || !shouldMonitorConcert) return;
 
       analyser.getFloatTimeDomainData(wetWindow);
       let peak = 0;

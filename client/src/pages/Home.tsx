@@ -192,6 +192,7 @@ export default function Home() {
   const failedQueueTrackIdsRef = useRef<Set<string>>(new Set());
   const nextPrefetchKeyRef = useRef<string | null>(null);
   const mediaStoreReconciledRef = useRef(false);
+  const lastPositionSyncRef = useRef(0);
 
   const hiResTracks = useMemo(
     () => queue.library.filter((track) => track.isHiRes),
@@ -404,18 +405,20 @@ export default function Home() {
     };
   }, [audioProcessor.isPlaying, nowPlayingTrack?.id]);
 
-  // Actualizar posición
+  // Actualizar posición sin saturar el bridge nativo durante reproducción.
   useEffect(() => {
-    if (audioProcessor.duration > 0) {
-      mediaSession.updatePosition(
-        audioProcessor.currentTime,
-        audioProcessor.duration,
-      );
-      mediaNotification.updatePosition(
-        audioProcessor.currentTime,
-        audioProcessor.duration,
-      );
-    }
+    if (audioProcessor.duration <= 0) return;
+    const now = performance.now();
+    if (now - lastPositionSyncRef.current < 1000) return;
+    lastPositionSyncRef.current = now;
+    mediaSession.updatePosition(
+      audioProcessor.currentTime,
+      audioProcessor.duration,
+    );
+    mediaNotification.updatePosition(
+      audioProcessor.currentTime,
+      audioProcessor.duration,
+    );
   }, [
     audioProcessor.currentTime,
     audioProcessor.duration,
