@@ -3,7 +3,9 @@ import { KnobControl } from "@/components/KnobControl";
 import { Switch } from "@/components/ui/switch";
 import type { TranslateFn } from "@/components/home/types";
 
-const SIGNAL_METER_BARS = [22, 34, 47, 61, 78, 86, 69, 58, 44, 31, 24, 18];
+const SIGNAL_METER_BARS = [
+  22, 34, 47, 61, 78, 86, 69, 58, 44, 31, 24, 18,
+] as const;
 
 interface HomeFxViewProps {
   t: TranslateFn;
