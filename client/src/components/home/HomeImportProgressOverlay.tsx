@@ -26,8 +26,8 @@ export function HomeImportProgressOverlay({
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-6">
       <div className="bg-zinc-900 rounded-2xl p-6 w-full max-w-sm border border-zinc-800 shadow-2xl">
         <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-full bg-purple-600/20 flex items-center justify-center">
-            <Music2 className="w-5 h-5 text-purple-400 animate-pulse" />
+          <div className="w-10 h-10 rounded-full bg-[rgba(255,16,42,0.12)] border border-[rgba(255,16,42,0.25)] flex items-center justify-center">
+            <Music2 className="w-5 h-5 text-[var(--ep-red)] animate-pulse" />
           </div>
           <div>
             <h3 className="font-semibold text-white">
@@ -40,7 +40,7 @@ export function HomeImportProgressOverlay({
         </div>
         <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden mb-3">
           <div
-            className="h-full bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-300"
+            className="h-full bg-gradient-to-r from-[var(--ep-red)] to-[var(--ep-red-dark)] transition-all duration-300"
             style={{ width: `${(current / importProgress.total) * 100}%` }}
           />
         </div>
