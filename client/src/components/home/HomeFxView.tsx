@@ -109,5 +109,3 @@ export function HomeFxView({
     </div>
   );
 }
-
-export default HomeFxView;
