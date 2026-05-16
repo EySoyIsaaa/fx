@@ -144,8 +144,10 @@ export function HomePlayerView({
 
   if (!isVisible) return null;
 
-  const track = queue.currentTrack;
-  const progress = audioProcessor.duration > 0 ? (audioProcessor.currentTime / audioProcessor.duration) * 100 : 0;
+  const progress =
+    audioProcessor.duration > 0
+      ? (audioProcessor.currentTime / audioProcessor.duration) * 100
+      : 0;
 
   if (showQueue) {
     return (
