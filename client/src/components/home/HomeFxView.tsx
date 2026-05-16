@@ -3,6 +3,8 @@ import { KnobControl } from "@/components/KnobControl";
 import { Switch } from "@/components/ui/switch";
 import type { TranslateFn } from "@/components/home/types";
 
+const SIGNAL_METER_BARS = [22, 34, 47, 61, 78, 86, 69, 58, 44, 31, 24, 18];
+
 interface HomeFxViewProps {
   t: TranslateFn;
   reverbEnabled: boolean;
@@ -35,6 +37,9 @@ export function HomeFxView({
   }, []);
   const meter = [22, 34, 47, 61, 78, 86, 69, 58, 44, 31, 24, 18];
 
+  useEffect(() => {
+    viewRef.current?.scrollTo({ top: 0, left: 0 });
+  }, []);
   return (
     <div ref={viewRef} className="flex-1 overflow-y-auto px-4 pb-32 pt-12" data-testid="fx-view">
       <header className="mb-5 flex items-start justify-between gap-4">
@@ -98,7 +103,7 @@ export function HomeFxView({
         <div className="mt-5 space-y-2">
           <div className="flex justify-between text-[10px] font-black uppercase tracking-[0.14em] text-[var(--ep-text-muted)]"><span>Signal</span><span>-3 dB</span></div>
           <div className="flex h-10 items-end gap-1 rounded-xl border border-[var(--ep-border)] bg-black p-2">
-            {meter.map((height, index) => <span key={index} className="signal-meter-bar flex-1 rounded-sm" style={{ height: `${height}%`, opacity: 0.28 + index / 18 }} />)}
+            {SIGNAL_METER_BARS.map((height, index) => <span key={index} className="signal-meter-bar flex-1 rounded-sm" style={{ height: `${height}%`, opacity: 0.28 + index / 18 }} />)}
           </div>
         </div>
       </section>
