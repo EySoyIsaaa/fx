@@ -127,7 +127,9 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-black text-white antialiased;
+    @apply antialiased;
+    background: var(--ep-bg);
+    color: var(--ep-text);
     font-family:
       "Inter",
       "Exo 2",
