@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { EQVisualizer } from "@/components/EQVisualizer";
@@ -15,8 +16,14 @@ interface HomeEqViewProps {
 }
 
 export function HomeEqView({ t, eqEnabled, eqBands, onToggleEq, onOpenAutoModal, onSetEqBandGain, onResetEq }: HomeEqViewProps) {
+  const viewRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    viewRef.current?.scrollTo({ top: 0, left: 0 });
+  }, []);
+
   return (
-    <div className="flex-1 overflow-y-auto px-4 pb-32 pt-12" data-testid="eq-view">
+    <div ref={viewRef} className="flex-1 overflow-y-auto px-4 pb-32 pt-12" data-testid="eq-view">
       <header className="mb-4 flex items-start justify-between gap-3">
         <div>
           <p className="premium-title text-[10px] font-black text-[var(--ep-red)]">DSP Equalizer</p>

@@ -1513,6 +1513,28 @@ export default function Home() {
     [dspParams, epicenterEnabled, t, updateDspParam],
   );
 
+  useEffect(() => {
+    if (!["dsp", "eq", "fx"].includes(activeTab)) return;
+
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    });
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== "player") return;
+
+    const originalOverflow = document.body.style.overflow;
+    const originalOverscroll = document.body.style.overscrollBehavior;
+    document.body.style.overflow = "hidden";
+    document.body.style.overscrollBehavior = "none";
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      document.body.style.overscrollBehavior = originalOverscroll;
+    };
+  }, [activeTab]);
+
   return (
     <div className="epicenter-shell min-h-screen flex flex-col bg-black text-white">
       <TrackContextMenu

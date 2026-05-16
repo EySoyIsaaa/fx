@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Disc3, GripVertical, Pause, Play, Plus, SkipBack, SkipForward, X } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AudioQualityBadge } from "@/components/AudioQualityBadge";
@@ -144,6 +144,9 @@ export function HomePlayerView({
 
   if (!isVisible) return null;
 
+  const track = queue.currentTrack;
+  const progress = audioProcessor.duration > 0 ? (audioProcessor.currentTime / audioProcessor.duration) * 100 : 0;
+
   if (showQueue) {
     return (
       <div className="flex flex-1 flex-col px-4 pb-28 pt-12" data-testid="player-view">
@@ -224,11 +227,11 @@ export function HomePlayerView({
   }
 
   return (
-    <div className="flex h-[100dvh] flex-col overflow-hidden px-5 pb-[6.35rem] pt-8" data-testid="player-view">
-      <header className="mb-3 flex flex-none items-center justify-between">
+    <div className="flex h-[100dvh] flex-col overflow-hidden px-5 pb-24 pt-10" data-testid="player-view">
+      <header className="mb-3 flex shrink-0 items-center justify-between">
         <div>
           <p className="premium-title text-[10px] font-black text-[var(--ep-red)]">EpicenterDSP</p>
-          <h1 className="premium-title text-lg font-black text-white">7.0 Head Unit</h1>
+          <h1 className="premium-title text-xl font-black text-white">7.0 Head Unit</h1>
         </div>
         <button onClick={onToggleQueue} className="rounded-full border border-[var(--ep-border)] bg-[#0d0d0d] px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.14em] text-[var(--ep-text-secondary)]">
           {t("player.queue")} ({queue.queue.length})
@@ -236,7 +239,7 @@ export function HomePlayerView({
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col justify-center">
-        <div className="relative mx-auto w-full max-w-[285px]">
+        <div className="relative mx-auto w-full max-w-[min(76vw,300px)]">
           <div className="absolute -inset-3 rounded-[2rem] bg-[radial-gradient(circle,rgba(255,16,42,0.18),transparent_64%)]" />
           <div className="album-shadow relative aspect-square overflow-hidden rounded-[1.6rem] border border-[var(--ep-border)] bg-[#101010]">
             <TrackArtwork src={track?.coverUrl} alt={track?.title || "No track"} iconClassName="h-20 w-20 text-zinc-700" />
@@ -244,26 +247,9 @@ export function HomePlayerView({
         </div>
 
         <div className="mt-4 text-center">
-          <h2 className="line-clamp-2 text-xl font-black leading-tight text-white">{track?.title || t("player.noTrack")}</h2>
+          <h2 className="line-clamp-2 text-2xl font-black leading-tight text-white">{track?.title || t("player.noTrack")}</h2>
           <p className="mt-1 truncate text-sm text-[var(--ep-text-secondary)]">{track?.artist || t("player.addMusic")}</p>
-          {track && (
-            <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
-              {track.isHiRes && (
-                <img
-                  src={hiresAudioBadgeUrl}
-                  alt="Hi-Res Audio"
-                  className="h-7 w-auto rounded border border-[rgba(255,16,42,0.4)] bg-black px-1.5 py-1"
-                />
-              )}
-              {track.isHiRes
-                ? qualityChips.map((chip) => (
-                    <span key={chip} className="quality-chip rounded-md px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.18em]">
-                      {chip}
-                    </span>
-                  ))
-                : <AudioQualityBadge bitDepth={track.bitDepth} sampleRate={track.sampleRate} bitrate={track.bitrate} isHiRes={track.isHiRes} />}
-            </div>
-          )}
+          {track && <div className="mt-3"><AudioQualityBadge bitDepth={track.bitDepth} sampleRate={track.sampleRate} bitrate={track.bitrate} isHiRes={track.isHiRes} hiResLogoUrl={hiresAudioBadgeUrl} /></div>}
         </div>
 
         <div className="mt-4">
@@ -285,19 +271,104 @@ export function HomePlayerView({
         <div className="mt-4 flex items-center justify-center gap-8">
           <button onClick={queue.previousTrack} disabled={!track} className="text-[var(--ep-text-secondary)] disabled:opacity-30"><SkipBack className="h-7 w-7" fill="currentColor" /></button>
           <button onClick={audioProcessor.isPlaying ? audioProcessor.pause : audioProcessor.play} disabled={!track} className="hardware-button flex h-16 w-16 items-center justify-center rounded-full text-white disabled:opacity-40">
-            {audioProcessor.isPlaying ? <Pause className="h-6 w-6" fill="currentColor" /> : <Play className="ml-1 h-7 w-7" fill="currentColor" />}
+            {audioProcessor.isPlaying ? <Pause className="h-7 w-7" fill="currentColor" /> : <Play className="ml-1 h-8 w-8" fill="currentColor" />}
           </button>
           <button onClick={queue.nextTrack} disabled={!track} className="text-[var(--ep-text-secondary)] disabled:opacity-30"><SkipForward className="h-7 w-7" fill="currentColor" /></button>
         </div>
 
-        <div className="mx-auto mt-4 w-full max-w-sm rounded-2xl border border-[var(--ep-border)] bg-[#090909] px-4 py-3">
-          <div className="flex items-center gap-3">
-            <span className={`h-2 w-2 rounded-full ${epicenterEnabled ? "bg-[var(--ep-red)] shadow-[0_0_9px_rgba(255,16,42,0.9)]" : "bg-zinc-700"}`} />
-            <p className="premium-title text-[10px] font-black text-white">Epicenter Engine {epicenterEnabled ? "Active" : "Standby"}</p>
+        <div className="mx-auto mt-4 w-full max-w-sm rounded-2xl border border-[var(--ep-border)] bg-[var(--ep-surface)] px-4 py-3">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-[var(--ep-red)] shadow-[0_0_9px_rgba(255,16,42,0.9)]" />
+            <p className="premium-title text-[10px] font-black text-[var(--ep-text)]">Epicenter Engine Active</p>
           </div>
-          <EngineSpectrum active={isVisible && !showQueue && audioProcessor.isPlaying && epicenterEnabled} analyserNode={analyserNode} />
+          <LiveEpicenterSpectrum
+            analyser={audioProcessor.getAnalyserNode?.() ?? null}
+            enabled={epicenterEnabled && audioProcessor.isPlaying}
+            progress={progress}
+          />
         </div>
       </div>
+    </div>
+  );
+}
+
+function LiveEpicenterSpectrum({
+  analyser,
+  enabled,
+  progress,
+}: {
+  analyser: AnalyserNode | null;
+  enabled: boolean;
+  progress: number;
+}) {
+  const frameRef = useRef<number | null>(null);
+  const [bars, setBars] = useState<number[]>(() => Array.from({ length: 24 }, () => 12));
+
+  useEffect(() => {
+    const stop = () => {
+      if (frameRef.current !== null) {
+        cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+      }
+    };
+
+    if (!enabled || document.hidden) {
+      stop();
+      return stop;
+    }
+
+    const bins = analyser ? new Uint8Array(analyser.frequencyBinCount) : null;
+    let tick = 0;
+
+    const draw = () => {
+      if (document.hidden) {
+        stop();
+        return;
+      }
+
+      if (analyser && bins) {
+        analyser.getByteFrequencyData(bins);
+        const step = Math.max(1, Math.floor(bins.length / 24));
+        setBars((prev) =>
+          prev.map((oldValue, index) => {
+            const start = index * step;
+            const slice = bins.subarray(start, start + step);
+            const average = slice.reduce((sum, value) => sum + value, 0) / Math.max(1, slice.length);
+            const next = 10 + (average / 255) * 90;
+            return oldValue * 0.45 + next * 0.55;
+          }),
+        );
+      } else {
+        tick += 1;
+        setBars((prev) =>
+          prev.map((oldValue, index) => {
+            const next = 16 + Math.abs(Math.sin((tick + index * 3) * 0.18)) * (28 + (progress % 32));
+            return oldValue * 0.65 + next * 0.35;
+          }),
+        );
+      }
+
+      frameRef.current = requestAnimationFrame(draw);
+    };
+
+    frameRef.current = requestAnimationFrame(draw);
+    document.addEventListener("visibilitychange", stop, { once: true });
+
+    return () => {
+      document.removeEventListener("visibilitychange", stop);
+      stop();
+    };
+  }, [analyser, enabled, progress]);
+
+  return (
+    <div className="flex h-9 items-end gap-1 rounded-xl border border-[var(--ep-border)] bg-[var(--ep-bg)] px-2 py-1.5">
+      {bars.map((height, index) => (
+        <span
+          key={index}
+          className="flex-1 rounded-t bg-[var(--ep-red)] shadow-[0_0_8px_rgba(255,16,42,0.35)]"
+          style={{ height: `${enabled ? Math.max(8, height) : 8}%`, opacity: enabled ? 0.38 + (index % 5) * 0.1 : 0.16 }}
+        />
+      ))}
     </div>
   );
 }

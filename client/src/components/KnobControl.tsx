@@ -168,23 +168,30 @@ export const KnobControl: React.FC<KnobControlProps> = React.memo(
 
     useEffect(() => {
       if (!isDragging) return;
-      const onPointerMove = (event: PointerEvent) => {
+
+      const originalOverflow = document.body.style.overflow;
+      const originalTouchAction = document.body.style.touchAction;
+      document.body.style.overflow = "hidden";
+      document.body.style.touchAction = "none";
+
+      const onMouseMove = (event: MouseEvent) => handleMove(event.clientY);
+      const onTouchMove = (event: TouchEvent) => {
         event.preventDefault();
-        handleMove(event.clientY);
+        if (event.touches[0]) handleMove(event.touches[0].clientY);
       };
-      const onPointerUp = (event: PointerEvent) => {
-        event.preventDefault();
-        handleEnd();
-      };
-      document.body.style.overscrollBehavior = "none";
-      document.addEventListener("pointermove", onPointerMove, { passive: false });
-      document.addEventListener("pointerup", onPointerUp, { passive: false });
-      document.addEventListener("pointercancel", onPointerUp, { passive: false });
+
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", handleEnd);
+      document.addEventListener("touchmove", onTouchMove, { passive: false });
+      document.addEventListener("touchend", handleEnd);
+
       return () => {
-        document.body.style.overscrollBehavior = "";
-        document.removeEventListener("pointermove", onPointerMove);
-        document.removeEventListener("pointerup", onPointerUp);
-        document.removeEventListener("pointercancel", onPointerUp);
+        document.body.style.overflow = originalOverflow;
+        document.body.style.touchAction = originalTouchAction;
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", handleEnd);
+        document.removeEventListener("touchmove", onTouchMove);
+        document.removeEventListener("touchend", handleEnd);
       };
     }, [handleEnd, handleMove, isDragging]);
 
@@ -199,23 +206,18 @@ export const KnobControl: React.FC<KnobControlProps> = React.memo(
           ref={canvasRef}
           width={size}
           height={size}
-          style={{ width: size, height: size, touchAction: "none" }}
-          onPointerDown={(event) => {
+          style={{ width: size, height: size, touchAction: "none", overscrollBehavior: "contain" }}
+          onMouseDown={(event) => handleStart(event.clientY)}
+          onTouchStart={(event) => {
             event.preventDefault();
-            event.currentTarget.setPointerCapture(event.pointerId);
-            handleStart(event.clientY);
+            handleStart(event.touches[0].clientY);
           }}
-          onPointerMove={(event) => {
-            if (!isDragging) return;
+          onTouchMove={(event) => {
             event.preventDefault();
-            handleMove(event.clientY);
+            handleMove(event.touches[0].clientY);
           }}
-          onPointerUp={(event) => {
-            event.preventDefault();
-            handleEnd();
-          }}
-          onPointerCancel={handleEnd}
-          className={`select-none transition-opacity ${disabled ? "cursor-not-allowed opacity-40" : "cursor-ns-resize"}`}
+          onTouchEnd={handleEnd}
+          className={`transition-opacity ${disabled ? "cursor-not-allowed opacity-40" : "cursor-ns-resize"}`}
           data-testid={`knob-${label.toLowerCase()}`}
         />
         <div className="text-center">

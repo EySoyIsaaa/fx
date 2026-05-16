@@ -10,6 +10,7 @@ interface AudioQualityBadgeProps {
   bitrate?: number;
   isHiRes?: boolean;
   compact?: boolean;
+  hiResLogoUrl?: string;
 }
 
 export function AudioQualityBadge({
@@ -18,6 +19,7 @@ export function AudioQualityBadge({
   bitrate,
   isHiRes,
   compact = false,
+  hiResLogoUrl,
 }: AudioQualityBadgeProps) {
   const detectedHiRes = isHiResQuality(bitDepth, sampleRate);
   const isHighRes = typeof isHiRes === "boolean" ? isHiRes : detectedHiRes;
@@ -45,7 +47,6 @@ export function AudioQualityBadge({
   }
 
   const chips = [
-    isHighRes ? "HI-RES" : "STANDARD",
     bitDepth ? `${bitDepth} BIT` : null,
     sampleRate ? `${Math.round(sampleRate / 100) / 10} kHz` : null,
     bitrate ? `${Math.round(bitrate / 1000)} kbps` : null,
@@ -53,6 +54,15 @@ export function AudioQualityBadge({
 
   return (
     <div className="flex flex-wrap justify-center gap-2" data-testid="quality-badge">
+      {isHighRes && hiResLogoUrl ? (
+        <span className="quality-chip inline-flex items-center rounded-md px-2.5 py-1">
+          <img src={hiResLogoUrl} alt="Hi-Res Audio" className="h-4 w-auto object-contain" />
+        </span>
+      ) : (
+        <span className="quality-chip rounded-md px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.18em]">
+          {isHighRes ? "HI-RES" : "STANDARD"}
+        </span>
+      )}
       {chips.map((chip) => (
         <span
           key={chip}

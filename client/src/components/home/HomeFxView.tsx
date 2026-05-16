@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { KnobControl } from "@/components/KnobControl";
 import { Switch } from "@/components/ui/switch";
 import type { TranslateFn } from "@/components/home/types";
@@ -25,11 +26,17 @@ export function HomeFxView({
   onToggleConcertHall,
   onConcertHallAmountChange,
 }: HomeFxViewProps) {
+  const viewRef = useRef<HTMLDivElement | null>(null);
   const effectsEnabled = reverbEnabled || concertHallEnabled;
   const meter = [22, 34, 47, 61, 78, 86, 69, 58, 44, 31, 24, 18];
 
+  useEffect(() => {
+    viewRef.current?.scrollTo({ top: 0, left: 0 });
+  }, []);
+  const meter = [22, 34, 47, 61, 78, 86, 69, 58, 44, 31, 24, 18];
+
   return (
-    <div className="flex-1 overflow-y-auto px-4 pb-32 pt-12" data-testid="fx-view">
+    <div ref={viewRef} className="flex-1 overflow-y-auto px-4 pb-32 pt-12" data-testid="fx-view">
       <header className="mb-5 flex items-start justify-between gap-4">
         <div>
           <p className="premium-title text-[10px] font-black text-[var(--ep-red)]">DSP Rack / Output</p>
