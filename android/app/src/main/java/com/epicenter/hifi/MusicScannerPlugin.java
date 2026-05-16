@@ -720,10 +720,7 @@ public class MusicScannerPlugin extends Plugin {
     String sourceVersionKey = call.getString("sourceVersionKey");
     Long expectedSize = call.getLong("expectedSize");
     Boolean allowStreamingOpt = call.getBoolean("allowStreaming");
-    boolean allowStreaming = false;
-    if (Boolean.TRUE.equals(allowStreamingOpt)) {
-      android.util.Log.i("MusicScanner", "streamingOptionIgnored allowStreamingRequested=true forced=false");
-    }
+    boolean allowStreaming = Boolean.TRUE.equals(allowStreamingOpt);
     
     if (contentUri == null || contentUri.isEmpty()) {
       call.reject("contentUri is required");
