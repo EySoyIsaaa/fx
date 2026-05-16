@@ -30,6 +30,12 @@ export function HomeFxView({
 }: HomeFxViewProps) {
   const viewRef = useRef<HTMLDivElement | null>(null);
   const effectsEnabled = reverbEnabled || concertHallEnabled;
+  const meter = [22, 34, 47, 61, 78, 86, 69, 58, 44, 31, 24, 18];
+
+  useEffect(() => {
+    viewRef.current?.scrollTo({ top: 0, left: 0 });
+  }, []);
+  const meter = [22, 34, 47, 61, 78, 86, 69, 58, 44, 31, 24, 18];
 
   useEffect(() => {
     viewRef.current?.scrollTo({ top: 0, left: 0 });

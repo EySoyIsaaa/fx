@@ -3,10 +3,77 @@ import { ChevronDown, Disc3, GripVertical, Pause, Play, Plus, SkipBack, SkipForw
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AudioQualityBadge } from "@/components/AudioQualityBadge";
 import { TrackArtwork } from "@/components/TrackArtwork";
+import { AudioSpectrumMeter } from "@/components/AudioSpectrumMeter";
 import type { Track } from "@/hooks/useAudioQueue";
 import type { TranslateFn } from "@/components/home/types";
 
 type TouchStartState = { index: number; y: number } | null;
+
+function EngineSpectrum({
+  active,
+  analyserNode,
+}: {
+  active: boolean;
+  analyserNode: AnalyserNode | null;
+}) {
+  const frameRef = useRef<number | null>(null);
+  const dataRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
+  const [bars, setBars] = useState<number[]>(() => Array.from({ length: 24 }, (_, index) => 18 + ((index * 7) % 22)));
+
+  useEffect(() => {
+    if (!active || !analyserNode || document.visibilityState !== "visible") {
+      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+      return;
+    }
+
+    if (!dataRef.current || dataRef.current.length !== analyserNode.frequencyBinCount) {
+      dataRef.current = new Uint8Array(analyserNode.frequencyBinCount) as Uint8Array<ArrayBuffer>;
+    }
+
+    let lastUpdate = 0;
+    const tick = (time: number) => {
+      if (document.visibilityState !== "visible") {
+        frameRef.current = null;
+        return;
+      }
+
+      analyserNode.getByteFrequencyData(dataRef.current!);
+      if (time - lastUpdate > 66) {
+        lastUpdate = time;
+        const data = dataRef.current!;
+        const stride = Math.max(1, Math.floor(data.length / 96));
+        setBars((previous) =>
+          previous.map((_, index) => {
+            const lowBiasedIndex = Math.min(data.length - 1, 2 + index * stride);
+            const value = data[lowBiasedIndex] ?? 0;
+            return Math.max(8, Math.min(100, 10 + (value / 255) * 92));
+          }),
+        );
+      }
+      frameRef.current = requestAnimationFrame(tick);
+    };
+
+    frameRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    };
+  }, [active, analyserNode]);
+
+  return (
+    <div className="mt-2 flex h-8 items-end gap-1 overflow-hidden rounded-xl border border-[var(--ep-border)] bg-black/70 px-2 py-1.5">
+      {bars.map((height, index) => (
+        <span
+          key={index}
+          className="flex-1 rounded-t-sm bg-[var(--ep-red)] shadow-[0_0_8px_rgba(255,16,42,0.35)]"
+          style={{ height: `${height}%`, opacity: active ? 0.35 + (index % 5) * 0.12 : 0.16 }}
+        />
+      ))}
+    </div>
+  );
+}
+
 
 interface PlayerQueueState {
   queue: Track[];
@@ -64,6 +131,17 @@ export function HomePlayerView({
   hiresAudioBadgeUrl,
   epicenterEnabled,
 }: HomePlayerViewProps) {
+  const track = queue.currentTrack;
+  const analyserNode = audioProcessor.getAnalyserNode?.() ?? null;
+  const qualityChips = useMemo(() => {
+    if (!track) return [];
+    return [
+      track.bitDepth ? `${track.bitDepth} BIT` : null,
+      track.sampleRate ? `${Math.round(track.sampleRate / 100) / 10} kHz` : null,
+      track.bitrate ? `${Math.round(track.bitrate / 1000)} kbps` : null,
+    ].filter(Boolean) as string[];
+  }, [track]);
+
   if (!isVisible) return null;
 
   const track = queue.currentTrack;
