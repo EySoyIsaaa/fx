@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Disc3, GripVertical, Pause, Play, Plus, SkipBack, SkipForward, X } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AudioQualityBadge } from "@/components/AudioQualityBadge";
