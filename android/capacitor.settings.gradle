@@ -6,4 +6,4 @@ include ':capgo-capacitor-media-session'
 project(':capgo-capacitor-media-session').projectDir = new File('../node_modules/.pnpm/@capgo+capacitor-media-session@8.0.7_@capacitor+core@6.2.1/node_modules/@capgo/capacitor-media-session/android')
 
 include ':odion-cloud-capacitor-mediastore'
-project(':odion-cloud-capacitor-mediastore').projectDir = new File('../node_modules/.pnpm/@odion-cloud+capacitor-medi_3050b555a54715d42f37cfb1ac9717d1/node_modules/@odion-cloud/capacitor-mediastore/android')
+project(':odion-cloud-capacitor-mediastore').projectDir = new File('../node_modules/.pnpm/@odion-cloud+capacitor-mediastore@1.0.21_@capacitor+core@6.2.1/node_modules/@odion-cloud/capacitor-mediastore/android')
