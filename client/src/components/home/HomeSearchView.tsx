@@ -24,33 +24,44 @@ export function HomeSearchView({
   onAddToPlaylist,
 }: HomeSearchViewProps) {
   return (
-    <div className="flex-1 flex flex-col" data-testid="search-view">
-      <header className="px-6 pt-12 pb-4 border-b border-zinc-900">
-        <h2 className="text-xl font-bold">{t("search.globalTitle")}</h2>
-        <p className="text-xs text-zinc-500 mt-1">
+    <div className="flex-1 flex flex-col pb-32" data-testid="search-view">
+      <header className="px-5 pt-12 pb-3">
+        <p className="premium-title text-[10px] font-black text-[var(--ep-red)]">
+          Library Search
+        </p>
+        <h2 className="premium-title mt-1 text-2xl font-black text-white">
+          {t("search.globalTitle")}
+        </h2>
+        <p className="mt-1 text-xs text-[var(--ep-text-secondary)]">
           {t("search.globalSubtitle")}
         </p>
       </header>
-      <div className="px-6 pt-3">
-        <label className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900/60 px-3 py-2">
-          <Search className="w-4 h-4 text-zinc-500" />
+      <div className="px-4 pt-2">
+        <label className="premium-card flex items-center gap-3 rounded-2xl px-4 py-3">
+          <Search className="w-5 h-5 text-[var(--ep-red)]" />
           <input
             value={globalSearchQuery}
             onChange={(event) => setGlobalSearchQuery(event.target.value)}
             placeholder={t("search.globalPlaceholder")}
-            className="w-full bg-transparent text-sm text-zinc-100 placeholder:text-zinc-500 outline-none"
+            className="w-full bg-transparent text-sm font-semibold text-[var(--ep-text)] placeholder:text-[var(--ep-text-muted)] outline-none"
           />
         </label>
       </div>
       <ScrollArea className="flex-1 px-4 py-3">
         {!normalizedGlobalQuery ? (
-          <p className="text-center text-zinc-500 py-10 text-sm">
-            {t("search.startTyping")}
-          </p>
+          <div className="premium-card mx-auto mt-8 max-w-sm rounded-3xl p-6 text-center">
+            <Search className="mx-auto mb-3 h-9 w-9 text-[var(--ep-red)]" />
+            <p className="text-sm text-[var(--ep-text-secondary)]">
+              {t("search.startTyping")}
+            </p>
+          </div>
         ) : globalResults.length === 0 ? (
-          <p className="text-center text-zinc-500 py-10 text-sm">
-            {t("search.noResults")}
-          </p>
+          <div className="premium-card mx-auto mt-8 max-w-sm rounded-3xl p-6 text-center">
+            <Search className="mx-auto mb-3 h-9 w-9 text-[var(--ep-text-muted)]" />
+            <p className="text-sm text-[var(--ep-text-secondary)]">
+              {t("search.noResults")}
+            </p>
+          </div>
         ) : (
           <div className="space-y-1">
             {globalResults.map((track) => (
