@@ -102,8 +102,8 @@ const clampDspParam = (key: keyof StreamingParams, value: number): number => {
   }
 };
 
-const ANDROID_FAST_STREAMING_ENABLED = false;
-const ANDROID_PREFETCH_ENABLED = false;
+const ANDROID_FAST_STREAMING_ENABLED = true;
+const ANDROID_PREFETCH_ENABLED = true;
 
 const clampDspParams = (params: StreamingParams): StreamingParams => ({
   sweepFreq: clampDspParam("sweepFreq", params.sweepFreq),

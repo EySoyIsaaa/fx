@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { logger } from "@/lib/logger";
 
-const ANDROID_FAST_STREAMING_ENABLED = false;
+const ANDROID_FAST_STREAMING_ENABLED = true;
 
 
 export interface AndroidAudioFileUrlResult {
